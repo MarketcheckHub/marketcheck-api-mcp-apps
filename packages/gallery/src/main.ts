@@ -979,9 +979,9 @@ function render() {
 
   renderTopNav();
   renderHero();
+  renderApps();
   renderModes();
   renderAuthPanel();
-  renderApps();
   renderFooter();
 }
 
@@ -1252,41 +1252,74 @@ function renderModes() {
   section.appendChild(grid);
   document.body.appendChild(section);
 
+  // Embed instructions — inline panel toggle
   document.getElementById("btn-show-embed")?.addEventListener("click", () => {
-    const panel = document.getElementById("auth-container");
+    const panel = document.getElementById("embed-instructions-panel");
     if (panel) {
-      panel.classList.add("open");
-      // Switch to OAuth tab
-      document.querySelectorAll(".auth-tab").forEach((t, i) => {
-        t.classList.toggle("active", i === 1);
-      });
-      document.querySelectorAll(".auth-pane").forEach((p, i) => {
-        p.classList.toggle("active", i === 1);
-      });
-      panel.scrollIntoView({ behavior: "smooth", block: "center" });
+      const isOpen = panel.style.display !== "none";
+      panel.style.display = isOpen ? "none" : "block";
+      if (!isOpen) panel.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   });
 
-  // MCP setup modal
+  // MCP instructions — inline panel toggle
   document.getElementById("btn-show-mcp")?.addEventListener("click", () => {
-    showMcpSetupModal();
+    const panel = document.getElementById("mcp-instructions-panel");
+    if (panel) {
+      const isOpen = panel.style.display !== "none";
+      panel.style.display = isOpen ? "none" : "block";
+      if (!isOpen) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   });
-}
 
-function showMcpSetupModal() {
-  const serverUrl = location.origin + "/mcp";
-  const overlay = document.createElement("div");
-  overlay.className = "modal-overlay";
-  overlay.innerHTML = `
-    <div class="modal" style="max-width:580px;">
-      <h3 style="display:flex;align-items:center;gap:8px;">
-        <span style="color:var(--brand-light);font-size:22px;">&#10023;</span>
-        Using with AI Assistants
+  // ── Embed Instructions Inline Panel ──────────────────────────────────
+  const embedPanel = document.createElement("div");
+  embedPanel.id = "embed-instructions-panel";
+  embedPanel.style.cssText = "display:none;margin-top:24px;animation:slideDown 0.3s ease;";
+  embedPanel.innerHTML = `
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px;max-width:720px;">
+      <h3 style="font-size:16px;font-weight:600;color:var(--text-heading);margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+        <span style="color:var(--purple);">&lt;/&gt;</span> Embedding Apps in Your Portal
       </h3>
-      <p>These apps render as interactive UIs inside MCP-compatible AI hosts. The AI calls a tool, and the app appears inline in the conversation.</p>
+      <p style="font-size:14px;color:var(--muted);margin-bottom:20px;line-height:1.5;">Embed any app as an iframe. For security, use <strong>OAuth access tokens</strong> (not API keys) — tokens expire in 6 hours and can be revoked.</p>
+
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Step 1: Generate an OAuth token (server-side)</div>
+        <code style="display:block;background:var(--input-bg);border:1px solid var(--border);padding:12px;border-radius:8px;font-size:12px;color:var(--text);font-family:var(--mono);white-space:pre-wrap;line-height:1.6;">curl -X POST https://api.marketcheck.com/oauth2/token \\
+  -H "Content-Type: application/json" \\
+  -d '{"grant_type":"client_credentials","client_id":"YOUR_API_KEY","client_secret":"YOUR_SECRET"}'</code>
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Step 2: Embed with the token</div>
+        <code style="display:block;background:var(--input-bg);border:1px solid var(--border);padding:12px;border-radius:8px;font-size:12px;color:var(--text);font-family:var(--mono);white-space:pre-wrap;line-height:1.6;">&lt;iframe
+  src="${location.origin}/apps/deal-evaluator/dist/index.html?access_token=TOKEN&amp;embed=true&amp;vin=5TDJSKFC2NS055758"
+  width="100%" height="700"
+  style="border:none;border-radius:8px;"
+&gt;&lt;/iframe&gt;</code>
+      </div>
+
+      <div style="padding:12px 14px;background:rgba(139,92,246,0.08);border:1px solid rgba(139,92,246,0.2);border-radius:8px;font-size:12px;color:var(--purple);line-height:1.5;">
+        <strong>Security:</strong> OAuth tokens expire in 6 hours and can be revoked at <a href="https://developers.marketcheck.com" target="_blank" style="color:var(--purple);">developers.marketcheck.com</a>. Never embed API keys or client secrets directly in iframe URLs.
+      </div>
+    </div>
+  `;
+  section.appendChild(embedPanel);
+
+  // ── MCP Instructions Inline Panel ────────────────────────────────────
+  const serverUrl = location.origin + "/mcp";
+  const mcpPanel = document.createElement("div");
+  mcpPanel.id = "mcp-instructions-panel";
+  mcpPanel.style.cssText = "display:none;margin-top:24px;animation:slideDown 0.3s ease;";
+  mcpPanel.innerHTML = `
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px;max-width:720px;">
+      <h3 style="font-size:16px;font-weight:600;color:var(--text-heading);margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+        <span style="color:var(--brand-light);font-size:20px;">&#10023;</span> Using with AI Assistants
+      </h3>
+      <p style="font-size:14px;color:var(--muted);margin-bottom:20px;line-height:1.5;">These apps render as interactive UIs inside MCP-compatible AI hosts. The AI calls a tool, and the app appears inline in the conversation.</p>
 
       <div style="margin-bottom:20px;">
-        <div class="auth-label">MCP Server URL</div>
+        <div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">MCP Server URL</div>
         <div style="display:flex;gap:8px;">
           <input class="auth-input" id="mcp-url-display" type="text" readonly value="${serverUrl}" style="flex:1;cursor:text;" />
           <button class="btn btn-primary btn-sm" id="btn-copy-mcp-url">Copy</button>
@@ -1330,23 +1363,19 @@ function showMcpSetupModal() {
       <div style="padding:12px 14px;background:rgba(6,106,171,0.08);border:1px solid rgba(6,106,171,0.2);border-radius:8px;font-size:12px;color:var(--brand-light);line-height:1.5;">
         <strong>Environment variable:</strong> Set <code style="font-size:11px;">MARKETCHECK_API_KEY</code> on the server for live data in MCP mode. Without it, apps will use mock data.
       </div>
-
-      <div class="modal-actions" style="margin-top:20px;">
-        <button class="btn btn-secondary" id="modal-mcp-close">Close</button>
-        <a href="https://github.com/MarketcheckHub/marketcheck-mcp-apps" target="_blank" class="btn btn-primary" style="text-decoration:none;">View on GitHub</a>
-      </div>
     </div>
   `;
+  section.appendChild(mcpPanel);
 
-  document.body.appendChild(overlay);
-  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
-  document.getElementById("modal-mcp-close")?.addEventListener("click", () => overlay.remove());
-  document.getElementById("btn-copy-mcp-url")?.addEventListener("click", () => {
-    navigator.clipboard.writeText(serverUrl);
-    const btn = document.getElementById("btn-copy-mcp-url")!;
-    btn.textContent = "Copied!";
-    setTimeout(() => { btn.textContent = "Copy"; }, 2000);
-  });
+  // Copy MCP URL button
+  setTimeout(() => {
+    document.getElementById("btn-copy-mcp-url")?.addEventListener("click", () => {
+      navigator.clipboard.writeText(serverUrl);
+      const btn = document.getElementById("btn-copy-mcp-url")!;
+      btn.textContent = "Copied!";
+      setTimeout(() => { btn.textContent = "Copy"; }, 2000);
+    });
+  }, 0);
 }
 
 // ── Auth Panel ──────────────────────────────────────────────────────────
