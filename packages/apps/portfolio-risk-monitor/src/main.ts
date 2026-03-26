@@ -131,7 +131,7 @@ interface HeatmapCell {
 // ── Mock Data ──────────────────────────────────────────────────────────
 function generateMockLoans(): Loan[] {
   const loans: Loan[] = [
-    { vin: "1HGCV1F34LA012345", year: 2022, make: "Toyota", model: "RAV4", segment: "SUV", loanBalance: 28500, currentFMV: 31200, ltv: 91.3, deprRate: 8.2, loanAge: 18 },
+    { vin: "KNDCB3LC9L5359658", year: 2022, make: "Toyota", model: "RAV4", segment: "SUV", loanBalance: 28500, currentFMV: 31200, ltv: 91.3, deprRate: 8.2, loanAge: 18 },
     { vin: "5YJSA1E26MF123456", year: 2021, make: "Tesla", model: "Model 3", segment: "EV", loanBalance: 35200, currentFMV: 29800, ltv: 118.1, deprRate: 18.5, loanAge: 30 },
     { vin: "1FTFW1E85MFA78901", year: 2023, make: "Ford", model: "F-150", segment: "Truck", loanBalance: 42000, currentFMV: 45600, ltv: 92.1, deprRate: 7.1, loanAge: 12 },
     { vin: "1G1ZD5ST7LF234567", year: 2020, make: "GM", model: "Malibu", segment: "Sedan", loanBalance: 18900, currentFMV: 15200, ltv: 124.3, deprRate: 16.8, loanAge: 42 },

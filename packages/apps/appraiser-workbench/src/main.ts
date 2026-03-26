@@ -796,7 +796,7 @@ function buildUI(): void {
       <div class="top-bar-inputs">
         <div class="input-group">
           <label>VIN</label>
-          <input type="text" id="vin-input" class="vin-input" maxlength="17" placeholder="Enter 17-char VIN" />
+          <input type="text" id="vin-input" class="vin-input" maxlength="17" placeholder="e.g. KNDCB3LC9L5359658" />
         </div>
         <div class="input-group">
           <label>Mileage</label>

@@ -195,14 +195,14 @@ const TOTAL_LOSS_THRESHOLD = 0.75;
 
 function getMockData(_vin: string): ValuationResult {
   return {
-    vin: _vin || "1HGCV3F58NA012345",
-    year: 2022,
-    make: "Honda",
-    model: "Accord",
-    trim: "EX-L",
-    fmv: 26800,
-    low: 24200,
-    high: 29400,
+    vin: _vin || "KNDCB3LC9L5359658",
+    year: 2020,
+    make: "Kia",
+    model: "Forte",
+    trim: "LXS",
+    fmv: 15800,
+    low: 14200,
+    high: 17500,
     soldComps: [
       { vin: "1HGCV3F51NA034567", year: 2022, make: "Honda", model: "Accord", trim: "EX-L", salePrice: 27100, miles: 28400, dateSold: "2026-03-12", state: "CA" },
       { vin: "1HGCV3F52NA045678", year: 2022, make: "Honda", model: "Accord", trim: "EX-L", salePrice: 26500, miles: 31200, dateSold: "2026-03-08", state: "TX" },
@@ -296,7 +296,7 @@ function fmtPct(n: number): string {
 
 
 const state: AppState = {
-  vin: "1HGCV3F58NA012345",
+  vin: "KNDCB3LC9L5359658",
   mileage: "32400",
   zip: "95123",
   damageSeverity: "severe",
@@ -723,7 +723,7 @@ function buildInputSection(): HTMLElement {
   row.className = "input-row";
 
   // VIN
-  const vinField = makeInputField("VIN", state.vin, "1HGCV3F58NA012345", (v) => { state.vin = v; });
+  const vinField = makeInputField("VIN", state.vin, "KNDCB3LC9L5359658", (v) => { state.vin = v; });
   vinField.querySelector("input")!.style.width = "210px";
   row.appendChild(vinField);
 

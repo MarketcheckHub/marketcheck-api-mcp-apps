@@ -470,6 +470,7 @@ async function main() {
   }
 
   const vinInput = makeField("VIN", "Enter 17-character VIN", { width: "240px" });
+  vinInput.value = "KNDCB3LC9L5359658";
   const priceInput = makeField("Asking Price (optional)", "$0", { width: "140px", type: "number" });
   const milesInput = makeField("Mileage (optional)", "e.g. 35000", { width: "140px", type: "number" });
   const zipInput = makeField("ZIP Code (optional)", "e.g. 80202", { width: "120px" });

@@ -156,32 +156,32 @@ const CONDITION_ADJ: Record<Condition, number> = {
 
 const MOCK_RESULT: TradeInResult = {
   vehicle: {
-    vin: "1HGCV1F34LA012345",
+    vin: "KNDCB3LC9L5359658",
     year: 2020,
-    make: "Honda",
-    model: "Accord",
-    trim: "EX-L",
-    engine: "1.5L Turbo I4 192hp",
+    make: "Kia",
+    model: "Forte",
+    trim: "LXS",
+    engine: "2.0L I4 147hp",
     transmission: "CVT",
     drivetrain: "FWD",
     fuel_type: "Gasoline",
-    msrp: 31090,
+    msrp: 19790,
     body_type: "Sedan",
   },
-  privatePartyValue: 24500,
-  privatePartyLow: 22100,
-  privatePartyHigh: 27200,
-  tradeInValue: 21800,
-  tradeInLow: 19500,
-  tradeInHigh: 23600,
-  instantCashLow: 18200,
-  instantCashHigh: 20900,
+  privatePartyValue: 15800,
+  privatePartyLow: 14200,
+  privatePartyHigh: 17500,
+  tradeInValue: 13900,
+  tradeInLow: 12400,
+  tradeInHigh: 15200,
+  instantCashLow: 11600,
+  instantCashHigh: 13400,
   soldComps: [
-    { year: 2020, make: "Honda", model: "Accord EX-L", price: 24200, miles: 38200, days_to_sell: 18, location: "San Jose, CA" },
-    { year: 2020, make: "Honda", model: "Accord EX-L", price: 25100, miles: 32100, days_to_sell: 12, location: "Oakland, CA" },
-    { year: 2020, make: "Honda", model: "Accord EX", price: 22800, miles: 45600, days_to_sell: 24, location: "Sacramento, CA" },
-    { year: 2020, make: "Honda", model: "Accord EX-L", price: 23900, miles: 41300, days_to_sell: 21, location: "Fremont, CA" },
-    { year: 2020, make: "Honda", model: "Accord Sport", price: 23400, miles: 39800, days_to_sell: 15, location: "San Francisco, CA" },
+    { year: 2020, make: "Kia", model: "Forte LXS", price: 15400, miles: 42100, days_to_sell: 16, location: "San Jose, CA" },
+    { year: 2020, make: "Kia", model: "Forte LXS", price: 16200, miles: 35800, days_to_sell: 11, location: "Oakland, CA" },
+    { year: 2020, make: "Kia", model: "Forte FE", price: 14100, miles: 51200, days_to_sell: 22, location: "Sacramento, CA" },
+    { year: 2020, make: "Kia", model: "Forte LXS", price: 15100, miles: 44600, days_to_sell: 19, location: "Fremont, CA" },
+    { year: 2020, make: "Kia", model: "Forte GT-Line", price: 16800, miles: 38400, days_to_sell: 13, location: "San Francisco, CA" },
   ],
   compCount: 47,
   dateRange: "Jan 2026 - Mar 2026",
@@ -246,6 +246,7 @@ function renderInputSection() {
   const vinGroup = createInputGroup("VIN (Vehicle Identification Number)", "Enter 17-character VIN");
   const vinInput = vinGroup.querySelector("input") as HTMLInputElement;
   vinInput.maxLength = 17;
+  vinInput.value = "KNDCB3LC9L5359658";
   vinInput.style.fontSize = "16px";
   vinInput.style.padding = "12px 16px";
   vinInput.style.letterSpacing = "1.5px";
