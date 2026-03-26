@@ -12,8 +12,9 @@ const root = join(__dirname, "..");
 const publicDir = join(root, "public");
 
 // Clean and create public/
+import { rmSync } from "node:fs";
 if (existsSync(publicDir)) {
-  cpSync(publicDir, publicDir + "_bak", { recursive: true, force: true });
+  rmSync(publicDir, { recursive: true, force: true });
 }
 mkdirSync(publicDir, { recursive: true });
 
@@ -36,10 +37,5 @@ for (const app of apps) {
 }
 console.log(`✓ ${apps.length} apps → public/apps/`);
 
-// Clean backup
-const bakDir = publicDir + "_bak";
-if (existsSync(bakDir)) {
-  cpSync(bakDir, "/dev/null", { recursive: true, force: true });
-}
 
 console.log("Done. public/ is ready for Vercel.");
