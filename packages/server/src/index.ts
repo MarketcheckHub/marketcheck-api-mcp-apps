@@ -66,8 +66,9 @@ try {
   console.warn(`  MCP disabled: ${e.message?.slice(0, 100)}`);
 }
 
-// ── Static file serving for gallery + apps ──────────────────────────────
+// ── Static file serving for gallery + apps + assets ─────────────────────
 const rootDir = path.join(import.meta.dirname, "..", "..", "..");
+app.use("/assets", express.static(path.join(rootDir, "static")));
 app.use("/apps", express.static(path.join(rootDir, "packages", "apps")));
 app.use("/", express.static(path.join(rootDir, "packages", "gallery", "dist")));
 

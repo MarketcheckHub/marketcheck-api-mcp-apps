@@ -699,6 +699,40 @@ body {
   margin-bottom: 16px;
 }
 
+.app-thumbnail {
+  width: 100%;
+  aspect-ratio: 16/10;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  position: relative;
+  transition: border-color 0.2s;
+}
+.app-thumbnail:hover { border-color: var(--brand); }
+.app-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+  display: block;
+}
+.app-thumbnail .zoom-hint {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.app-thumbnail:hover .zoom-hint { opacity: 1; }
+
 .app-footer {
   display: flex;
   align-items: center;
@@ -730,6 +764,99 @@ body {
   border-color: var(--border-light);
   background: rgba(6, 106, 171, 0.08);
 }
+
+.app-share-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 6px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  background: none;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  font-family: var(--font);
+  padding: 0;
+  position: relative;
+}
+.app-share-btn:hover {
+  color: var(--text);
+  border-color: var(--border-light);
+  background: rgba(6, 106, 171, 0.08);
+}
+
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+.lightbox-overlay img {
+  max-width: 92vw;
+  max-height: 88vh;
+  border-radius: 8px;
+  box-shadow: 0 16px 64px rgba(0,0,0,0.5);
+  cursor: default;
+}
+.lightbox-close {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  z-index: 301;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lightbox-close:hover { background: rgba(255,255,255,0.2); }
+
+.share-menu {
+  position: absolute;
+  bottom: 40px;
+  right: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  z-index: 10;
+  display: none;
+  min-width: 170px;
+}
+.share-menu.open { display: block; animation: slideDown 0.2s ease; }
+.share-menu a, .share-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text);
+  text-decoration: none;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--font);
+  text-align: left;
+}
+.share-menu a:hover, .share-menu button:hover { background: rgba(6,106,171,0.1); }
 
 .app-open-btn {
   padding: 7px 18px;
@@ -1199,6 +1326,7 @@ function renderHero() {
     <div class="hero-ctas">
       <a href="#apps" class="btn btn-primary">Explore Apps &#8594;</a>
       <button class="btn btn-secondary" id="btn-connect">Connect Live Data</button>
+      <button class="btn btn-secondary" id="btn-share-page" style="gap:6px;">&#8599; Share</button>
     </div>
     <div class="hero-stats">
       <div class="hero-stat"><div class="val">25</div><div class="lbl">Apps</div></div>
@@ -1215,6 +1343,17 @@ function renderHero() {
     if (panel) {
       panel.classList.toggle("open");
       panel.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
+
+  document.getElementById("btn-share-page")?.addEventListener("click", () => {
+    const shareText = "25 free interactive automotive market intelligence dashboards — powered by MarketCheck. Try them now:";
+    const shareUrl = location.origin;
+    if (navigator.share) {
+      navigator.share({ title: "MarketCheck Apps", text: shareText, url: shareUrl });
+    } else {
+      const tw = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`;
+      window.open(tw, "_blank");
     }
   });
 }
@@ -1658,7 +1797,15 @@ function renderApps() {
       card.style.animationDelay = `${delay * 0.04}s`;
       delay++;
 
+      const shareText = encodeURIComponent(`Check out ${app.name} — ${app.tagline}. Free interactive automotive dashboard powered by MarketCheck.`);
+      const shareUrl = encodeURIComponent(`${location.origin}/apps/${app.id}/dist/index.html`);
+      const screenshotUrl = `/assets/screenshots/${app.id}.png`;
+
       card.innerHTML = `
+        <div class="app-thumbnail" data-app-id="${app.id}" title="Click to preview">
+          <img src="${screenshotUrl}" alt="${app.name} preview" loading="lazy" onerror="this.parentElement.style.display='none'" />
+          <span class="zoom-hint">&#128269; Preview</span>
+        </div>
         <div class="app-top">
           <div class="app-name">${app.name}</div>
           <span class="app-mode-badge ${live ? "live" : "demo"}">${live ? "LIVE" : "DEMO"}</span>
@@ -1666,10 +1813,16 @@ function renderApps() {
         <div class="app-tagline">${app.tagline}</div>
         <div class="app-footer">
           <span class="app-segment-badge" style="background:${seg.color}18;color:${seg.color};border:1px solid ${seg.color}33;">${seg.name}</span>
-          <div style="display:flex;align-items:center;gap:8px;">
+          <div style="display:flex;align-items:center;gap:6px;position:relative;">
             <a href="https://github.com/MarketcheckHub/marketcheck-mcp-apps/tree/main/packages/apps/${app.id}" target="_blank" class="app-source-link" title="View Source">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
             </a>
+            <button class="app-share-btn" title="Share" data-share-id="${app.id}">&#8599;</button>
+            <div class="share-menu" id="share-menu-${app.id}">
+              <a href="https://twitter.com/intent/tweet?text=${shareText}&url=${shareUrl}" target="_blank">&#120143; Post on X</a>
+              <a href="https://www.linkedin.com/sharing/share-offsite/?url=${shareUrl}" target="_blank">&#128279; Share on LinkedIn</a>
+              <button class="copy-link-btn" data-url="${location.origin}/apps/${app.id}/dist/index.html">&#128203; Copy Link</button>
+            </div>
             <button class="app-open-btn" data-app-id="${app.id}" data-app-name="${app.name}">Open &#8594;</button>
           </div>
         </div>
@@ -1691,6 +1844,28 @@ function renderApps() {
           // No auth — show modal with Demo / API Key options
           showAppOpenModal(id, name);
         }
+      });
+
+      // Thumbnail click → lightbox
+      card.querySelector(".app-thumbnail")?.addEventListener("click", () => {
+        showLightbox(`/assets/screenshots/${app.id}.png`, app.name);
+      });
+
+      // Share button
+      card.querySelector(".app-share-btn")?.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const menu = document.getElementById(`share-menu-${app.id}`);
+        // Close all other menus
+        document.querySelectorAll(".share-menu.open").forEach(m => { if (m !== menu) m.classList.remove("open"); });
+        menu?.classList.toggle("open");
+      });
+
+      // Copy link button
+      card.querySelector(".copy-link-btn")?.addEventListener("click", (e) => {
+        const url = (e.currentTarget as HTMLElement).getAttribute("data-url")!;
+        navigator.clipboard.writeText(url);
+        showToast("Link copied to clipboard");
+        document.querySelectorAll(".share-menu.open").forEach(m => m.classList.remove("open"));
       });
 
       card.setAttribute("data-app-id", app.id);
@@ -1739,6 +1914,34 @@ function showToast(message: string) {
   toast.classList.add("show");
   setTimeout(() => toast!.classList.remove("show"), 3000);
 }
+
+// ── Lightbox ────────────────────────────────────────────────────────────
+
+function showLightbox(src: string, alt: string) {
+  const overlay = document.createElement("div");
+  overlay.className = "lightbox-overlay";
+  overlay.innerHTML = `
+    <button class="lightbox-close">&times;</button>
+    <img src="${src}" alt="${alt}" />
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay || (e.target as HTMLElement).classList.contains("lightbox-close")) {
+      overlay.remove();
+    }
+  });
+  document.addEventListener("keydown", function handler(e) {
+    if (e.key === "Escape") { overlay.remove(); document.removeEventListener("keydown", handler); }
+  });
+}
+
+// Close share menus on outside click
+document.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement;
+  if (!target.closest(".app-share-btn") && !target.closest(".share-menu")) {
+    document.querySelectorAll(".share-menu.open").forEach(m => m.classList.remove("open"));
+  }
+});
 
 // ── Badge Refresh ───────────────────────────────────────────────────────
 

@@ -38,4 +38,13 @@ for (const app of apps) {
 console.log(`✓ ${apps.length} apps → public/apps/`);
 
 
+// Copy static assets (screenshots) → public/assets/screenshots/
+const staticDir = join(root, "static", "screenshots");
+if (existsSync(staticDir)) {
+  const dest = join(publicDir, "assets", "screenshots");
+  mkdirSync(dest, { recursive: true });
+  cpSync(staticDir, dest, { recursive: true });
+  console.log("✓ Screenshots → public/assets/screenshots/");
+}
+
 console.log("Done. public/ is ready for Vercel.");
