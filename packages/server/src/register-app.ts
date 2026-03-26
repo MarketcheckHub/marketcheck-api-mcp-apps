@@ -1,15 +1,17 @@
 /**
  * Helper to register an MCP App tool + resource pair.
- * Each app is a tool that returns data + a ui:// resource that renders the HTML.
+ * Gracefully handles SDK schema validation errors.
  */
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import {
-  registerAppTool,
-  registerAppResource,
-  RESOURCE_MIME_TYPE,
-} from "@modelcontextprotocol/ext-apps/server";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+
+let extApps: any = null;
+try {
+  extApps = await import("@modelcontextprotocol/ext-apps/server");
+} catch {
+  console.warn("  ext-apps/server not available — MCP App registration disabled");
+}
 
 interface AppRegistration {
   server: McpServer;
@@ -18,10 +20,10 @@ interface AppRegistration {
   description: string;
   inputSchema: Record<string, unknown>;
   handler: (args: any) => Promise<{ content: Array<{ type: string; text: string }> }>;
-  htmlFileName: string; // e.g., "used-car-market-index"
+  htmlFileName: string;
 }
 
-export async function registerApp({
+export function registerApp({
   server,
   toolName,
   title,
@@ -30,39 +32,46 @@ export async function registerApp({
   handler,
   htmlFileName,
 }: AppRegistration) {
+  if (!extApps) return;
+
   const resourceUri = `ui://marketcheck/${htmlFileName}`;
 
-  registerAppTool(
-    server,
-    toolName,
-    {
-      title,
-      description,
-      inputSchema,
-      _meta: { ui: { resourceUri } },
-    },
-    handler,
-  );
+  try {
+    extApps.registerAppTool(
+      server,
+      toolName,
+      {
+        title,
+        description,
+        inputSchema,
+        _meta: { ui: { resourceUri } },
+      },
+      handler,
+    );
 
-  registerAppResource(
-    server,
-    resourceUri,
-    resourceUri,
-    { mimeType: RESOURCE_MIME_TYPE },
-    async () => {
-      const htmlPath = path.join(
-        import.meta.dirname,
-        "..",
-        "..",
-        "apps",
-        htmlFileName,
-        "dist",
-        "index.html",
-      );
-      const html = await fs.readFile(htmlPath, "utf-8");
-      return {
-        contents: [{ uri: resourceUri, mimeType: RESOURCE_MIME_TYPE, text: html }],
-      };
-    },
-  );
+    extApps.registerAppResource(
+      server,
+      resourceUri,
+      resourceUri,
+      { mimeType: extApps.RESOURCE_MIME_TYPE },
+      async () => {
+        const htmlPath = path.join(
+          import.meta.dirname,
+          "..",
+          "..",
+          "apps",
+          htmlFileName,
+          "dist",
+          "index.html",
+        );
+        const html = await fs.readFile(htmlPath, "utf-8");
+        return {
+          contents: [{ uri: resourceUri, mimeType: extApps.RESOURCE_MIME_TYPE, text: html }],
+        };
+      },
+    );
+  } catch (e: any) {
+    // Silently skip — MCP tool registration failed but server continues
+    throw e; // Re-throw so caller's try-catch can log it
+  }
 }
