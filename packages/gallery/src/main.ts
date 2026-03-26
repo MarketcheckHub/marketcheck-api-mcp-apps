@@ -719,6 +719,55 @@ body {
   object-position: top left;
   display: block;
 }
+.app-thumbnail .carousel-images {
+  display: flex;
+  transition: transform 0.3s ease;
+  width: 100%;
+  height: 100%;
+}
+.app-thumbnail .carousel-images img {
+  flex-shrink: 0;
+  width: 100%;
+  height: 100%;
+}
+.app-thumbnail .carousel-dots {
+  position: absolute;
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 5px;
+}
+.app-thumbnail .carousel-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.4);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.app-thumbnail .carousel-dot.active { background: #fff; }
+.app-thumbnail .carousel-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.app-thumbnail:hover .carousel-nav { opacity: 1; }
+.app-thumbnail .carousel-prev { left: 6px; }
+.app-thumbnail .carousel-next { right: 6px; }
 .app-thumbnail .zoom-hint {
   position: absolute;
   top: 8px;
@@ -1800,12 +1849,36 @@ function renderApps() {
       const shareText = encodeURIComponent(`Check out ${app.name} — ${app.tagline}. Free interactive automotive dashboard powered by MarketCheck.`);
       const shareUrl = encodeURIComponent(`${location.origin}/apps/${app.id}/dist/index.html`);
       const screenshotUrl = `/assets/screenshots/${app.id}.png`;
+      const formUrl = `/assets/screenshots/${app.id}-form.png`;
+      const resultUrl = `/assets/screenshots/${app.id}-result.png`;
 
-      card.innerHTML = `
+      // Apps with form+result screenshots get a carousel
+      const hasCarousel = [
+        "trade-in-estimator", "deal-evaluator", "appraiser-workbench",
+        "car-search-compare", "earnings-signal-dashboard", "claims-valuation-workbench",
+        "comparables-explorer", "oem-incentives-explorer"
+      ].includes(app.id);
+
+      const thumbnailHtml = hasCarousel ? `
+        <div class="app-thumbnail" data-app-id="${app.id}" title="Click to preview">
+          <div class="carousel-images" data-slide="0">
+            <img src="${screenshotUrl}" alt="${app.name}" loading="lazy" onerror="this.style.display='none'" />
+            <img src="${resultUrl}" alt="${app.name} result" loading="lazy" />
+          </div>
+          <button class="carousel-nav carousel-prev" data-dir="-1">&#8249;</button>
+          <button class="carousel-nav carousel-next" data-dir="1">&#8250;</button>
+          <div class="carousel-dots"><span class="carousel-dot active"></span><span class="carousel-dot"></span></div>
+          <span class="zoom-hint">&#128269; Preview</span>
+        </div>
+      ` : `
         <div class="app-thumbnail" data-app-id="${app.id}" title="Click to preview">
           <img src="${screenshotUrl}" alt="${app.name} preview" loading="lazy" onerror="this.parentElement.style.display='none'" />
           <span class="zoom-hint">&#128269; Preview</span>
         </div>
+      `;
+
+      card.innerHTML = `
+        ${thumbnailHtml}
         <div class="app-top">
           <div class="app-name">${app.name}</div>
           <span class="app-mode-badge ${live ? "live" : "demo"}">${live ? "LIVE" : "DEMO"}</span>
@@ -1846,9 +1919,39 @@ function renderApps() {
         }
       });
 
-      // Thumbnail click → lightbox
-      card.querySelector(".app-thumbnail")?.addEventListener("click", () => {
-        showLightbox(`/assets/screenshots/${app.id}.png`, app.name);
+      // Carousel navigation
+      const carouselImages = card.querySelector(".carousel-images") as HTMLElement | null;
+      if (carouselImages) {
+        const navBtns = card.querySelectorAll(".carousel-nav");
+        const dots = card.querySelectorAll(".carousel-dot");
+        let currentSlide = 0;
+        const totalSlides = 2;
+
+        const goToSlide = (idx: number) => {
+          currentSlide = Math.max(0, Math.min(idx, totalSlides - 1));
+          carouselImages.style.transform = `translateX(-${currentSlide * 100}%)`;
+          dots.forEach((d, i) => d.classList.toggle("active", i === currentSlide));
+        };
+
+        navBtns.forEach(btn => {
+          btn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const dir = parseInt((btn as HTMLElement).getAttribute("data-dir")!);
+            goToSlide(currentSlide + dir);
+          });
+        });
+
+        dots.forEach((dot, i) => {
+          dot.addEventListener("click", (e) => { e.stopPropagation(); goToSlide(i); });
+        });
+      }
+
+      // Thumbnail click → lightbox (show current carousel image)
+      card.querySelector(".app-thumbnail")?.addEventListener("click", (e) => {
+        if ((e.target as HTMLElement).closest(".carousel-nav, .carousel-dot")) return;
+        const currentIdx = carouselImages ? Math.round(Math.abs(parseFloat(carouselImages.style.transform?.replace(/[^0-9.-]/g, "") || "0")) / 100) : 0;
+        const images = [screenshotUrl, resultUrl];
+        showLightbox(hasCarousel ? images[currentIdx] || screenshotUrl : screenshotUrl, app.name);
       });
 
       // Share button
