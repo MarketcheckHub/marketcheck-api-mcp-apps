@@ -172,14 +172,14 @@ async function run() {
 
       // Take the "form" screenshot (initial state)
       await new Promise(r => setTimeout(r, 1500));
-      await page.screenshot({ path: join(outDir, `${app.id}-form.png`) });
+      await page.screenshot({ fullPage: true, path: join(outDir, `${app.id}-form.png`) });
       console.log(`    ✓ ${app.id}-form.png`);
 
       // Perform actions (fill form, click submit)
       await app.actions(page);
 
       // Take the "result" screenshot
-      await page.screenshot({ path: join(outDir, `${app.id}-result.png`) });
+      await page.screenshot({ fullPage: true, path: join(outDir, `${app.id}-result.png`) });
       console.log(`    ✓ ${app.id}-result.png`);
 
     } catch (e) {

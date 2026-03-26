@@ -30,6 +30,7 @@ const APPS: AppDef[] = [
   { id: "deal-evaluator", name: "Deal Evaluator", tagline: "Should I buy this car? Get a Buy/Negotiate/Pass verdict", segment: "Consumer" },
   { id: "car-search-compare", name: "Car Search & Compare", tagline: "Find and compare cars side by side", segment: "Consumer" },
   { id: "oem-incentives-explorer", name: "OEM Incentives Explorer", tagline: "Cash back, APR, and lease deals by ZIP", segment: "Consumer" },
+  { id: "car-search-app", name: "Car Search", tagline: "Full search with SERP, vehicle details, and natural language search", segment: "Consumer" },
   { id: "appraiser-workbench", name: "Appraiser Workbench", tagline: "Complete vehicle valuation studio", segment: "Appraiser" },
   { id: "comparables-explorer", name: "Comparables Explorer", tagline: "Price distribution and market positioning", segment: "Appraiser" },
   { id: "depreciation-analyzer", name: "Depreciation Analyzer", tagline: "Track how vehicles lose value over time", segment: "Appraiser" },
@@ -1378,7 +1379,7 @@ function renderHero() {
       <button class="btn btn-secondary" id="btn-share-page" style="gap:6px;">&#8599; Share</button>
     </div>
     <div class="hero-stats">
-      <div class="hero-stat"><div class="val">25</div><div class="lbl">Apps</div></div>
+      <div class="hero-stat"><div class="val">26</div><div class="lbl">Apps</div></div>
       <div class="hero-stat"><div class="val">11</div><div class="lbl">Segments</div></div>
       <div class="hero-stat"><div class="val">9</div><div class="lbl">API Tools</div></div>
       <div class="hero-stat"><div class="val">4</div><div class="lbl">Modes</div></div>
@@ -1856,7 +1857,7 @@ function renderApps() {
       const hasCarousel = [
         "trade-in-estimator", "deal-evaluator", "appraiser-workbench",
         "car-search-compare", "earnings-signal-dashboard", "claims-valuation-workbench",
-        "comparables-explorer", "oem-incentives-explorer"
+        "comparables-explorer", "oem-incentives-explorer", "car-search-app"
       ].includes(app.id);
 
       const thumbnailHtml = hasCarousel ? `
