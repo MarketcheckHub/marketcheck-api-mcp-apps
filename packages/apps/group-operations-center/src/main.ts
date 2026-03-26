@@ -283,7 +283,7 @@ function fmtNum(v: number): string {
 
 // ── App Init ───────────────────────────────────────────────────────────
 
-app.onToolResult("group-operations-center", (_result) => {
+(_safeApp as any)?.onToolResult("group-operations-center", (_result) => {
   // When live data arrives we would parse it; for now mock data is used
 });
 

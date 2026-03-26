@@ -334,7 +334,7 @@ function drawHorizontalBarChart(
 
 // ── Main App ───────────────────────────────────────────────────────────
 
-app.onToolResult("location-benchmarking", (_result) => {
+(_safeApp as any)?.onToolResult("location-benchmarking", (_result) => {
   // When live data arrives we would parse it; for now mock data is used
 });
 

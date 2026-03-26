@@ -1122,8 +1122,8 @@ function makeButton(text: string, onClick: () => void, variant: "primary" | "sec
 }
 
 // ── Init ───────────────────────────────────────────────────────────────────
-app.addEventListener("ready", () => {
+(_safeApp as any)?.addEventListener("ready", () => {
   render();
 });
 
-app.init();
+(_safeApp as any)?.init();

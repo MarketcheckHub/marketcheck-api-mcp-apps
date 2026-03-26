@@ -1090,9 +1090,7 @@ function recalcAndRender(): void {
 
 // ── Initialize ─────────────────────────────────────────────────────────────────
 
-app.onready = () => {
-  renderApp();
-  // Auto-load mock data for demo
-  state.result = getMockData(state.vin);
-  recalcAndRender();
-};
+// Initialize — works both in MCP host and standalone
+renderApp();
+state.result = getMockData(state.vin);
+recalcAndRender();

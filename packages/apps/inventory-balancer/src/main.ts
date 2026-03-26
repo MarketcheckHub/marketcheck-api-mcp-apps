@@ -401,7 +401,7 @@ function statusLabel(status: "balanced" | "understocked" | "overstocked"): strin
 // ── Main App ───────────────────────────────────────────────────────────
 
 
-app.onToolResult("inventory-balancer", (_result) => {
+(_safeApp as any)?.onToolResult("inventory-balancer", (_result) => {
   // When live data arrives we would parse it; for now mock data is used
 });
 

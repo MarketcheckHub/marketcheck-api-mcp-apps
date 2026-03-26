@@ -421,7 +421,7 @@ function drawSparkline(canvas: HTMLCanvasElement, data: number[], color: string)
 
 // ── Main App ───────────────────────────────────────────────────────────
 
-app.onToolResult("watchlist-monitor", (_result) => {
+(_safeApp as any)?.onToolResult("watchlist-monitor", (_result) => {
   // When live data arrives we would parse it; for now mock data is used
 });
 

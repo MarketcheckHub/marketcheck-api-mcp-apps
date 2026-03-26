@@ -597,7 +597,7 @@ function drawSegmentDonut(canvas: HTMLCanvasElement, loans: Loan[]): void {
 // ── Main ──────────────────────────────────────────────────────────────
 
 
-app.render(async ({ el }) => {
+(_safeApp as any)?.render(async ({ el }) => {
   const loans = generateMockLoans();
   const heatmapData = generateHeatmapData();
 

@@ -433,7 +433,7 @@ async function main() {
   const app = new App({ name: "deal-evaluator" });
   let serverAvailable = false;
   try {
-    await app.init();
+    await (_safeApp as any)?.init();
     serverAvailable = true;
   } catch {
     serverAvailable = false;
