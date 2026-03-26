@@ -13,8 +13,8 @@ interface ProxyRequest {
   [key: string]: any;
 }
 
-async function mcFetch(path: string, authMode: string, authValue: string, params: Record<string, any> = {}, method: "GET" | "POST" = "GET", body?: any): Promise<any> {
-  const basePath = authMode === "oauth_token" ? "/oauth/v2" : "/v2";
+async function mcFetch(path: string, authMode: string, authValue: string, params: Record<string, any> = {}, opts?: { noV2Prefix?: boolean }): Promise<any> {
+  const basePath = opts?.noV2Prefix ? "" : (authMode === "oauth_token" ? "/oauth/v2" : "/v2");
   const url = new URL(`${MC_API_HOST}${basePath}${path}`);
 
   if (authMode === "api_key") {
@@ -24,16 +24,12 @@ async function mcFetch(path: string, authMode: string, authValue: string, params
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const headers: Record<string, string> = {};
   if (authMode === "oauth_token") {
     headers["Authorization"] = `Bearer ${authValue}`;
   }
 
-  const res = await fetch(url.toString(), {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const res = await fetch(url.toString(), { headers });
 
   if (!res.ok) {
     const text = await res.text();
@@ -42,14 +38,14 @@ async function mcFetch(path: string, authMode: string, authValue: string, params
   return res.json();
 }
 
-// ── Tool Handlers (reuse server tool logic via direct API calls) ────────
+// ── Tool Handlers — correct MarketCheck API endpoints ───────────────────
 
 async function handleDecodeVin(auth: { mode: string; value: string }, args: any) {
-  return mcFetch("/decode/neovin", auth.mode, auth.value, {}, "POST", { vin: args.vin });
+  return mcFetch(`/decode/car/neovin/${args.vin}/specs`, auth.mode, auth.value);
 }
 
 async function handlePredictPrice(auth: { mode: string; value: string }, args: any) {
-  return mcFetch("/pricing/predict", auth.mode, auth.value, {
+  return mcFetch("/predict/car/us/marketcheck_price/comparables", auth.mode, auth.value, {
     vin: args.vin, miles: args.miles, dealer_type: args.dealer_type,
     zip: args.zip, is_certified: args.is_certified,
   });
@@ -60,15 +56,15 @@ async function handleSearchActive(auth: { mode: string; value: string }, args: a
 }
 
 async function handleSearchPast90(auth: { mode: string; value: string }, args: any) {
-  return mcFetch("/search/car/past90", auth.mode, auth.value, args);
+  return mcFetch("/search/car/recents", auth.mode, auth.value, args);
 }
 
 async function handleCarHistory(auth: { mode: string; value: string }, args: any) {
-  return mcFetch("/history/listings", auth.mode, auth.value, { vin: args.vin, sort_order: args.sort_order });
+  return mcFetch(`/history/car/${args.vin}`, auth.mode, auth.value, { sort_order: args.sort_order });
 }
 
 async function handleSoldSummary(auth: { mode: string; value: string }, args: any) {
-  return mcFetch("/api/v1/sold-vehicles/summary", auth.mode, auth.value, args);
+  return mcFetch("/api/v1/sold-vehicles/summary", auth.mode, auth.value, args, { noV2Prefix: true });
 }
 
 async function handleIncentives(auth: { mode: string; value: string }, args: any) {

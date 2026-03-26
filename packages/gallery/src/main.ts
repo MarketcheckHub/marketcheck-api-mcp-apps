@@ -1371,7 +1371,7 @@ function renderHero() {
   content.innerHTML = `
     <div class="hero-badge"><img src="https://34682200.delivery.rocketcdn.me/wp-content/uploads/2024/05/cropped-MC-Icon.png.webp" alt="MC" style="height:16px;vertical-align:middle;margin-right:6px;border-radius:3px;" />Powered by MarketCheck Data</div>
     <h1><img src="https://34682200.delivery.rocketcdn.me/wp-content/uploads/2024/05/cropped-MC-Icon.png.webp" alt="MarketCheck" style="height:56px;vertical-align:middle;margin-right:12px;border-radius:8px;" />MarketCheck Apps</h1>
-    <p class="subtitle">25 interactive automotive market intelligence dashboards. Real-time data for dealers, appraisers, lenders, analysts, manufacturers, and consumers.</p>
+    <p class="subtitle">25 interactive automotive market intelligence dashboards. Real-time data for dealers, appraisers, lenders, analysts, manufacturers, and consumers. Fork them, use as reference, or build your own.</p>
     <div class="hero-ctas">
       <a href="#apps" class="btn btn-primary">Explore Apps &#8594;</a>
       <button class="btn btn-secondary" id="btn-connect">Connect Live Data</button>
