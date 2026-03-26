@@ -103,6 +103,45 @@ function _addSettingsBar(headerEl?: HTMLElement) {
 }
 // ── End Data Provider ──────────────────────────────────────────────────
 
+// ── Responsive CSS Injection ───────────────────────────────────────────
+(function injectResponsiveStyles() {
+  const s = document.createElement("style");
+  s.textContent = `
+    @media (max-width: 768px) {
+      body { font-size: 13px !important; }
+      table { font-size: 12px !important; }
+      th, td { padding: 6px 8px !important; }
+      h1 { font-size: 18px !important; }
+      h2 { font-size: 15px !important; }
+      canvas { max-width: 100% !important; }
+      input, select, button { font-size: 14px !important; }
+      /* Fix grid/flex layouts to stack on mobile */
+      [style*="display:flex"][style*="gap"],
+      [style*="display: flex"][style*="gap"] { flex-wrap: wrap !important; }
+      [style*="grid-template-columns: repeat"] { grid-template-columns: 1fr !important; }
+      [style*="grid-template-columns:repeat"] { grid-template-columns: 1fr !important; }
+      /* Ensure tables scroll horizontally */
+      div[style*="overflow-x:auto"], div[style*="overflow-x: auto"] { -webkit-overflow-scrolling: touch; }
+      table { min-width: 600px; }
+      /* Stack panels that use percentage widths */
+      [style*="width:35%"], [style*="width:40%"], [style*="width:25%"],
+      [style*="width:50%"], [style*="width:60%"], [style*="width:65%"],
+      [style*="width: 35%"], [style*="width: 40%"], [style*="width: 25%"],
+      [style*="width: 50%"], [style*="width: 60%"], [style*="width: 65%"] {
+        width: 100% !important;
+        min-width: 0 !important;
+      }
+    }
+    @media (max-width: 480px) {
+      body { padding: 8px !important; }
+      h1 { font-size: 16px !important; }
+      th, td { padding: 4px 6px !important; font-size: 11px !important; }
+      input, select { max-width: 100% !important; width: 100% !important; box-sizing: border-box !important; }
+    }
+  `;
+  document.head.appendChild(s);
+})();
+
  } catch { return null; } })();
 
 // ── Types ──────────────────────────────────────────────────────────────────────

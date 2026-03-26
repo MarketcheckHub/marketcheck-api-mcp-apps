@@ -955,13 +955,103 @@ body {
 
 /* ── Responsive ───────────────────────────── */
 
+/* Tablet */
+@media (max-width: 900px) {
+  .app-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+  .mode-grid { grid-template-columns: repeat(2, 1fr); }
+  .hero h1 { font-size: 36px; letter-spacing: -1px; }
+  .hero h1 img { height: 40px !important; margin-right: 8px !important; }
+  .hero-stats { gap: 28px; }
+}
+
+/* Mobile */
 @media (max-width: 640px) {
-  .hero { min-height: 70vh; padding: 60px 16px 40px; }
-  .hero-stats { gap: 24px; }
-  .hero-stat .val { font-size: 24px; }
-  .mode-grid { grid-template-columns: 1fr; }
-  .app-grid { grid-template-columns: 1fr; }
+  /* Nav */
+  .top-nav { padding: 10px 12px; gap: 6px; }
+  .nav-title { font-size: 13px; }
+  .nav-logo { height: 22px; }
+  .nav-right { gap: 6px; }
+  .nav-link { font-size: 11px; }
+  .nav-github { font-size: 11px; padding: 4px 10px; }
+  .nav-github svg { width: 14px; height: 14px; }
+  .theme-toggle { width: 32px !important; height: 32px !important; font-size: 14px !important; }
+
+  /* Hero */
+  .hero { min-height: auto; padding: 80px 16px 40px; }
+  .hero h1 { font-size: 28px; letter-spacing: -0.5px; }
+  .hero h1 img { height: 32px !important; margin-right: 6px !important; }
+  .hero .subtitle { font-size: 14px; }
+  .hero-badge { font-size: 10px; padding: 4px 12px; }
+  .hero-ctas { flex-direction: column; width: 100%; }
+  .hero-ctas .btn { width: 100%; justify-content: center; }
+  .hero-stats { gap: 16px; flex-wrap: wrap; }
+  .hero-stat .val { font-size: 22px; }
+  .hero-stat .lbl { font-size: 10px; }
+
+  /* Sections */
+  .section { padding: 0 12px; }
+  .section-title { font-size: 12px; margin-bottom: 20px; }
+
+  /* Mode cards */
+  .modes { padding: 40px 0 50px; }
+  .mode-grid { grid-template-columns: 1fr; gap: 10px; }
+  .mode-card { padding: 20px 16px; }
+  .mode-icon { width: 34px; height: 34px; font-size: 15px; }
+  .mode-title { font-size: 14px; }
+  .mode-desc { font-size: 13px; }
+
+  /* App grid */
+  .apps { padding: 0 0 50px; }
+  .app-grid { grid-template-columns: 1fr; gap: 10px; }
+  .app-card { padding: 16px; }
+  .app-name { font-size: 14px; }
+  .app-tagline { font-size: 12px; margin-bottom: 12px; }
+  .app-segment-badge { font-size: 9px; padding: 2px 8px; }
+  .app-open-btn { font-size: 11px; padding: 6px 14px; }
+  .app-source-link { width: 26px; height: 26px; }
+  .app-source-link svg { width: 12px; height: 12px; }
+  .segment-header { margin-bottom: 14px; padding-bottom: 8px; }
+  .segment-name { font-size: 13px; }
+  .segment-group { margin-bottom: 32px; }
+
+  /* Auth panel */
+  .auth-panel { padding: 0 12px; }
+  .auth-body { padding: 16px; }
   .auth-row { flex-direction: column; }
+  .auth-input { font-size: 13px; padding: 10px 12px; }
+  .auth-tab { font-size: 12px; padding: 10px; }
+  .auth-warning { font-size: 12px; padding: 10px 12px; }
+
+  /* Modal */
+  .modal { padding: 20px; max-width: 95%; }
+  .modal h3 { font-size: 16px; }
+  .modal p { font-size: 13px; }
+  .modal-actions { flex-direction: column; }
+  .modal-actions .btn { width: 100%; }
+
+  /* Inline instruction panels */
+  #embed-instructions-panel > div,
+  #mcp-instructions-panel > div { padding: 16px; max-width: 100% !important; }
+  #embed-instructions-panel code,
+  #mcp-instructions-panel code { font-size: 10px; padding: 8px; }
+
+  /* Footer */
+  .footer { padding: 24px 12px; }
+  .footer-text { font-size: 11px; line-height: 2; }
+  .footer-sep { margin: 0 6px; }
+
+  /* Toast */
+  .toast { font-size: 13px; padding: 10px 20px; max-width: 90%; }
+}
+
+/* Small mobile */
+@media (max-width: 380px) {
+  .hero h1 { font-size: 24px; }
+  .hero h1 img { height: 26px !important; }
+  .nav-link { display: none; }
+  .nav-github span { display: none; }
+  .hero-stats { gap: 12px; }
+  .hero-stat .val { font-size: 18px; }
 }
 `;
 
