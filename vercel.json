@@ -1,0 +1,15 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "public",
+  "framework": null,
+  "functions": {
+    "api/index.ts": {
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/index.ts" },
+    { "source": "/apps/:path*", "destination": "/apps/:path*" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
