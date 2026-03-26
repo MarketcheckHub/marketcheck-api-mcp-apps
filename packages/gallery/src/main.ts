@@ -63,19 +63,65 @@ function getAccessToken(): string | null {
 function isLive(): boolean {
   return !!(getApiKey() || getAccessToken());
 }
+function getTheme(): "light" | "dark" {
+  return (localStorage.getItem("mc_theme") as "light" | "dark") ?? "light";
+}
+function setTheme(t: "light" | "dark") {
+  localStorage.setItem("mc_theme", t);
+  document.documentElement.setAttribute("data-theme", t);
+}
 
 // ── Styles ──────────────────────────────────────────────────────────────
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap');
 
-:root {
+/* ── Light Theme (default) ─────────────── */
+:root, [data-theme="light"] {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --border: #e2e8f0;
+  --border-light: #cbd5e1;
+  --text: #1e293b;
+  --text-heading: #0f172a;
+  --muted: #64748b;
+  --brand: #066aab;
+  --brand-light: #0987d4;
+  --green: #059669;
+  --yellow: #d97706;
+  --purple: #7c3aed;
+  --red: #dc2626;
+  --pink: #db2777;
+  --orange: #ea580c;
+  --cyan: #0891b2;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+  --card-hover-shadow: 0 4px 16px rgba(0,0,0,0.1);
+  --hero-gradient-a: rgba(6, 106, 171, 0.06);
+  --hero-gradient-b: rgba(6, 106, 171, 0.02);
+  --hero-point-color: rgba(6, 106, 171, 0.2);
+  --hero-line-color: rgba(6, 106, 171, 0.06);
+  --hero-title-gradient: linear-gradient(135deg, #0f172a 0%, #1e3a5f 40%, #066aab 100%);
+  --badge-demo-bg: rgba(217, 119, 6, 0.1);
+  --badge-demo-fg: #b45309;
+  --badge-live-bg: rgba(5, 150, 105, 0.1);
+  --badge-live-fg: #047857;
+  --input-bg: #f1f5f9;
+  --scrollbar-thumb: #cbd5e1;
+  --scrollbar-track: #f1f5f9;
+  --font: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', monospace;
+}
+
+/* ── Dark Theme ───────────────────────── */
+[data-theme="dark"] {
   --bg: #060a10;
   --surface: #0c1220;
   --card: #111827;
   --border: #1a2236;
   --border-light: #253046;
   --text: #e2e8f0;
+  --text-heading: #f8fafc;
   --muted: #7a8ba8;
   --brand: #066aab;
   --brand-light: #0987d4;
@@ -86,8 +132,20 @@ const CSS = `
   --pink: #ec4899;
   --orange: #f97316;
   --cyan: #06b6d4;
-  --font: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  --mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --card-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  --card-hover-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  --hero-gradient-a: rgba(6, 106, 171, 0.06);
+  --hero-gradient-b: rgba(6, 106, 171, 0.02);
+  --hero-point-color: rgba(6, 106, 171, 0.3);
+  --hero-line-color: rgba(6, 106, 171, 0.08);
+  --hero-title-gradient: linear-gradient(135deg, #fff 0%, #bfd4e8 40%, #066aab 100%);
+  --badge-demo-bg: rgba(245, 158, 11, 0.15);
+  --badge-demo-fg: #f59e0b;
+  --badge-live-bg: rgba(16, 185, 129, 0.15);
+  --badge-live-fg: #34d399;
+  --input-bg: #0f172a;
+  --scrollbar-thumb: #253046;
+  --scrollbar-track: #060a10;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -95,7 +153,7 @@ const CSS = `
 html {
   scroll-behavior: smooth;
   scrollbar-width: thin;
-  scrollbar-color: var(--border-light) var(--bg);
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
 body {
@@ -158,7 +216,7 @@ body {
   font-weight: 700;
   line-height: 1.05;
   letter-spacing: -1.5px;
-  background: linear-gradient(135deg, #fff 0%, #bfd4e8 40%, #066aab 100%);
+  background: var(--hero-title-gradient);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -235,7 +293,34 @@ body {
   font-size: 32px;
   font-weight: 700;
   font-family: var(--mono);
-  color: #fff;
+  color: var(--text-heading);
+}
+
+/* ── Theme Toggle ─────────────────────── */
+
+.theme-toggle {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 100;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s;
+  box-shadow: var(--card-shadow);
+}
+.theme-toggle:hover {
+  color: var(--text);
+  border-color: var(--brand);
+  box-shadow: var(--card-hover-shadow);
 }
 .hero-stat .lbl {
   font-size: 12px;
@@ -296,7 +381,7 @@ body {
 .mode-card:hover {
   border-color: var(--border-light);
   transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  box-shadow: var(--card-hover-shadow);
 }
 .mode-card:hover::before { opacity: 1; }
 
@@ -343,7 +428,7 @@ body {
 .mode-title {
   font-size: 16px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-heading);
 }
 
 .mode-desc {
@@ -428,7 +513,7 @@ body {
   padding: 12px 14px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--input-bg);
   color: var(--text);
   font-size: 14px;
   font-family: var(--mono);
@@ -466,7 +551,7 @@ body {
 }
 
 .token-display {
-  background: var(--bg);
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px;
@@ -492,7 +577,7 @@ body {
 }
 
 .embed-snippet {
-  background: var(--bg);
+  background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px;
@@ -541,7 +626,7 @@ body {
 .segment-name {
   font-size: 14px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-heading);
   letter-spacing: 0.3px;
 }
 
@@ -580,7 +665,7 @@ body {
 .app-card:hover {
   border-color: var(--border-light);
   transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+  box-shadow: var(--card-hover-shadow);
 }
 .app-card:hover::after { opacity: 1; }
 
@@ -594,7 +679,7 @@ body {
 .app-name {
   font-size: 15px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-heading);
   line-height: 1.3;
 }
 
@@ -607,8 +692,8 @@ body {
   flex-shrink: 0;
   margin-left: 12px;
 }
-.app-mode-badge.demo { background: rgba(245, 158, 11, 0.15); color: var(--yellow); }
-.app-mode-badge.live { background: rgba(16, 185, 129, 0.15); color: var(--green); }
+.app-mode-badge.demo { background: var(--badge-demo-bg); color: var(--badge-demo-fg); }
+.app-mode-badge.live { background: var(--badge-live-bg); color: var(--badge-live-fg); }
 
 .app-tagline {
   font-size: 13px;
@@ -717,11 +802,28 @@ body {
 // ── Render ──────────────────────────────────────────────────────────────
 
 function render() {
+  // Set initial theme (light default)
+  document.documentElement.setAttribute("data-theme", getTheme());
+
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.appendChild(style);
 
   document.body.innerHTML = "";
+
+  // Theme toggle button
+  const toggle = document.createElement("button");
+  toggle.className = "theme-toggle";
+  toggle.title = "Toggle theme";
+  toggle.innerHTML = getTheme() === "light" ? "&#9789;" : "&#9788;";
+  toggle.addEventListener("click", () => {
+    const next = getTheme() === "light" ? "dark" : "light";
+    setTheme(next);
+    toggle.innerHTML = next === "light" ? "&#9789;" : "&#9788;";
+    // Update hero canvas colors
+    if (heroCanvas) initHeroBg(heroCanvas);
+  });
+  document.body.appendChild(toggle);
 
   renderHero();
   renderModes();
@@ -729,6 +831,8 @@ function render() {
   renderApps();
   renderFooter();
 }
+
+let heroCanvas: HTMLCanvasElement | null = null;
 
 // ── Hero ────────────────────────────────────────────────────────────────
 
@@ -742,6 +846,7 @@ function renderHero() {
   const canvas = document.createElement("canvas");
   bgDiv.appendChild(canvas);
   hero.appendChild(bgDiv);
+  heroCanvas = canvas;
   initHeroBg(canvas);
 
   const content = document.createElement("div");
@@ -811,15 +916,16 @@ function initHeroBg(canvas: HTMLCanvasElement) {
     ctx!.clearRect(0, 0, w, h);
 
     // Radial gradient background
+    const isDark = getTheme() === "dark";
     const grad = ctx!.createRadialGradient(w * 0.5, h * 0.4, 0, w * 0.5, h * 0.4, w * 0.8);
-    grad.addColorStop(0, "rgba(6, 106, 171, 0.06)");
-    grad.addColorStop(0.5, "rgba(6, 106, 171, 0.02)");
+    grad.addColorStop(0, isDark ? "rgba(6, 106, 171, 0.06)" : "rgba(6, 106, 171, 0.04)");
+    grad.addColorStop(0.5, isDark ? "rgba(6, 106, 171, 0.02)" : "rgba(6, 106, 171, 0.015)");
     grad.addColorStop(1, "transparent");
     ctx!.fillStyle = grad;
     ctx!.fillRect(0, 0, w, h);
 
     // Draw connections
-    ctx!.strokeStyle = "rgba(6, 106, 171, 0.08)";
+    ctx!.strokeStyle = isDark ? "rgba(6, 106, 171, 0.08)" : "rgba(6, 106, 171, 0.06)";
     ctx!.lineWidth = 0.5;
     for (let i = 0; i < points.length; i++) {
       for (let j = i + 1; j < points.length; j++) {
@@ -839,7 +945,7 @@ function initHeroBg(canvas: HTMLCanvasElement) {
 
     // Draw + move points
     for (const p of points) {
-      ctx!.fillStyle = "rgba(6, 106, 171, 0.3)";
+      ctx!.fillStyle = isDark ? "rgba(6, 106, 171, 0.3)" : "rgba(6, 106, 171, 0.15)";
       ctx!.beginPath();
       ctx!.arc(p.x, p.y, p.r, 0, Math.PI * 2);
       ctx!.fill();
