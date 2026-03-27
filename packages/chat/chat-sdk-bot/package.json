@@ -1,0 +1,26 @@
+{
+  "name": "@mcp-apps/chat-sdk-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "chat": "^0.1.0",
+    "@chat-adapter/slack": "^0.1.0",
+    "@chat-adapter/discord": "^0.1.0",
+    "@chat-adapter/telegram": "^0.1.0",
+    "@chat-state/redis": "^0.1.0",
+    "@chat-state/memory": "^0.1.0",
+    "@ai-sdk/anthropic": "^1.0.0",
+    "ai": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "tsx": "^4.0.0"
+  }
+}

@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #060a10;
+  --bg-secondary: #0f172a;
+  --bg-tertiary: #1e293b;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --border: #334155;
+  --accent: #8b5cf6;
+  --accent-hover: #7c3aed;
+  --success: #34d399;
+}
+
+body {
+  font-family: "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* CopilotKit theme overrides for dark mode */
+.copilotKitChat {
+  --copilot-kit-background-color: var(--bg-secondary) !important;
+  --copilot-kit-secondary-color: var(--bg-tertiary) !important;
+  --copilot-kit-primary-color: var(--accent) !important;
+  --copilot-kit-contrast-color: var(--text-primary) !important;
+  --copilot-kit-secondary-contrast-color: var(--text-secondary) !important;
+}

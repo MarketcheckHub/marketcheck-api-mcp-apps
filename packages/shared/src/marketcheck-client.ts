@@ -5,7 +5,15 @@
  */
 
 const MC_API_BASE = process.env.MC_API_BASE ?? "https://mc-api.marketcheck.com/v2";
-const MC_API_KEY = process.env.MARKETCHECK_API_KEY ?? "";
+const MC_API_KEY_DEFAULT = process.env.MARKETCHECK_API_KEY ?? "";
+
+/**
+ * Global override for the API key — set by the MCP endpoint when a client
+ * connects with ?api_key=XXX on the MCP URL. Falls back to env var.
+ */
+let _mcApiKeyOverride: string | null = null;
+export function setMcApiKeyOverride(key: string | null) { _mcApiKeyOverride = key; }
+export function getMcApiKey(): string { return _mcApiKeyOverride || MC_API_KEY_DEFAULT; }
 
 interface RequestParams {
   [key: string]: string | number | boolean | undefined;
@@ -13,7 +21,7 @@ interface RequestParams {
 
 async function mcGet<T>(endpoint: string, params: RequestParams): Promise<T> {
   const url = new URL(`${MC_API_BASE}${endpoint}`);
-  url.searchParams.set("api_key", MC_API_KEY);
+  url.searchParams.set("api_key", getMcApiKey());
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
   }
@@ -24,7 +32,7 @@ async function mcGet<T>(endpoint: string, params: RequestParams): Promise<T> {
 
 async function mcPost<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
   const url = new URL(`${MC_API_BASE}${endpoint}`);
-  url.searchParams.set("api_key", MC_API_KEY);
+  url.searchParams.set("api_key", getMcApiKey());
   const res = await fetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -114,5 +122,34 @@ export class MarketCheckClient {
     rows?: number; start?: number; stats?: string;
   }) {
     return mcGet<any>("/search/car/uk/recents", params as RequestParams);
+  }
+
+  async rankDealersForVehicle(params: {
+    vin: string;
+    zip?: string;
+    radius?: number;
+    rows?: number;
+  }) {
+    return mcGet<any>("/rank/dealers", params as RequestParams);
+  }
+
+  async rankVehiclesForDealer(params: {
+    dealer_id: string;
+    make?: string;
+    model?: string;
+    year?: string;
+    rows?: number;
+  }) {
+    return mcGet<any>("/rank/vehicles", params as RequestParams);
+  }
+
+  async searchOemIncentives(params: {
+    oem?: string;
+    model?: string;
+    offer_type?: string;
+    rows?: number;
+    start?: number;
+  }) {
+    return mcGet<any>("/incentives/search", params as RequestParams);
   }
 }

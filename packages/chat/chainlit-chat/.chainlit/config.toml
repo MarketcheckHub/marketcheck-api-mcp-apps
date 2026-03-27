@@ -1,0 +1,19 @@
+[project]
+enable_telemetry = false
+
+[UI]
+name = "MarketCheck AI"
+description = "Automotive market intelligence powered by MarketCheck + Claude"
+default_collapse_content = true
+default_expand_messages = false
+
+[UI.theme]
+layout = "wide"
+
+[UI.theme.light]
+background = "#f8fafc"
+paper = "#ffffff"
+
+[UI.theme.dark]
+background = "#060a10"
+paper = "#0f172a"

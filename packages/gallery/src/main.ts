@@ -12,45 +12,113 @@ interface AppDef {
 
 const SEGMENTS: { name: string; color: string; icon: string }[] = [
   { name: "Consumer", color: "#10b981", icon: "&#9733;" },
-  { name: "Appraiser", color: "#3b82f6", icon: "&#9878;" },
   { name: "Dealer", color: "#f59e0b", icon: "&#9881;" },
+  { name: "Appraiser", color: "#3b82f6", icon: "&#9878;" },
   { name: "Dealership Group", color: "#f97316", icon: "&#9632;" },
-  { name: "Analyst", color: "#8b5cf6", icon: "&#9650;" },
   { name: "Lender", color: "#06b6d4", icon: "&#9670;" },
+  { name: "Analyst", color: "#8b5cf6", icon: "&#9650;" },
   { name: "Insurer", color: "#ec4899", icon: "&#9829;" },
   { name: "Manufacturer", color: "#ef4444", icon: "&#9733;" },
   { name: "Auction House", color: "#84cc16", icon: "&#9654;" },
-  { name: "Lender Sales", color: "#14b8a6", icon: "&#8599;" },
+  { name: "Wholesaler", color: "#78716c", icon: "&#9670;" },
   { name: "Cross-Segment", color: "#a78bfa", icon: "&#8854;" },
+  { name: "Consumer (UK)", color: "#10b981", icon: "&#9733;" },
+  { name: "Dealer (UK)", color: "#f59e0b", icon: "&#9881;" },
+  { name: "Auto Media", color: "#d946ef", icon: "&#9998;" },
+  { name: "Fleet Manager", color: "#059669", icon: "&#9881;" },
+  { name: "Rental/Subscription", color: "#0ea5e9", icon: "&#9670;" },
+  { name: "Lender Sales", color: "#14b8a6", icon: "&#8599;" },
+  { name: "Chat Demos", color: "#6366f1", icon: "&#128172;" },
 ];
 
 const APPS: AppDef[] = [
-  { id: "used-car-market-index", name: "Used Car Market Index", tagline: "Track prices like Wall Street tracks stocks", segment: "Consumer" },
-  { id: "trade-in-estimator", name: "Trade-In Estimator", tagline: "What's your car worth? 3-tier instant valuation", segment: "Consumer" },
-  { id: "deal-evaluator", name: "Deal Evaluator", tagline: "Should I buy this car? Get a Buy/Negotiate/Pass verdict", segment: "Consumer" },
+  // ── Consumer (8 apps — ordered by impact: flagship first) ──
+  { id: "vin-market-report", name: "VIN Market Report", tagline: "VIN-based market report — embeddable widget like CarStory.ai", segment: "Consumer" },
   { id: "car-search-compare", name: "Car Search & Compare", tagline: "Find and compare cars side by side", segment: "Consumer" },
-  { id: "oem-incentives-explorer", name: "OEM Incentives Explorer", tagline: "Cash back, APR, and lease deals by ZIP", segment: "Consumer" },
   { id: "car-search-app", name: "Car Search", tagline: "Full search with SERP, vehicle details, and natural language search", segment: "Consumer" },
+  { id: "deal-evaluator", name: "Deal Evaluator", tagline: "Should I buy this car? Get a Buy/Negotiate/Pass verdict", segment: "Consumer" },
+  { id: "incentive-adjusted-deal-eval", name: "Incentive-Adjusted Deal Evaluator", tagline: "True out-of-pocket cost after rebates and APR savings", segment: "Consumer" },
+  { id: "trade-in-estimator", name: "Trade-In Estimator", tagline: "What's your car worth? 3-tier instant valuation", segment: "Consumer" },
+  { id: "used-car-market-index", name: "Used Car Market Index", tagline: "Track prices like Wall Street tracks stocks", segment: "Consumer" },
+  { id: "oem-incentives-explorer", name: "OEM Incentives Explorer", tagline: "Cash back, APR, and lease deals by ZIP", segment: "Consumer" },
+  { id: "incentive-deal-finder", name: "Incentive Deal Finder", tagline: "Search ALL OEM incentives by budget, not by brand", segment: "Consumer" },
+
+  // ── Dealer (5 apps — ordered by daily impact) ──
+  { id: "lot-pricing-dashboard", name: "Lot Pricing Dashboard", tagline: "See your entire lot priced against the market", segment: "Dealer" },
+  { id: "stocking-intelligence", name: "Stocking Intelligence", tagline: "Know what to buy at auction", segment: "Dealer" },
+  { id: "pricing-transparency-report", name: "Pricing Transparency Report", tagline: "Shareable market report dealers give buyers", segment: "Dealer" },
+  { id: "dealer-inventory-fit-scorer", name: "Dealer Inventory Fit Scorer", tagline: "Which cars match your sales DNA?", segment: "Dealer" },
+  { id: "dealer-conquest-analyzer", name: "Dealer Conquest Analyzer", tagline: "Find competitors' best-sellers you should stock", segment: "Dealer" },
+
+  // ── Appraiser (4 apps) ──
   { id: "appraiser-workbench", name: "Appraiser Workbench", tagline: "Complete vehicle valuation studio", segment: "Appraiser" },
   { id: "comparables-explorer", name: "Comparables Explorer", tagline: "Price distribution and market positioning", segment: "Appraiser" },
   { id: "depreciation-analyzer", name: "Depreciation Analyzer", tagline: "Track how vehicles lose value over time", segment: "Appraiser" },
   { id: "market-trends-dashboard", name: "Market Trends Dashboard", tagline: "The pulse of the automotive market", segment: "Appraiser" },
-  { id: "lot-pricing-dashboard", name: "Lot Pricing Dashboard", tagline: "See your entire lot priced against the market", segment: "Dealer" },
-  { id: "stocking-intelligence", name: "Stocking Intelligence", tagline: "Know what to buy at auction", segment: "Dealer" },
+
+  // ── Dealership Group (3 apps) ──
   { id: "group-operations-center", name: "Group Operations Center", tagline: "Every store, one screen", segment: "Dealership Group" },
-  { id: "location-benchmarking", name: "Location Benchmarking", tagline: "Rank and compare your locations", segment: "Dealership Group" },
   { id: "inventory-balancer", name: "Inventory Balancer", tagline: "Move the right cars to the right stores", segment: "Dealership Group" },
+  { id: "location-benchmarking", name: "Location Benchmarking", tagline: "Rank and compare your locations", segment: "Dealership Group" },
+
+  // ── Lender (3 apps — ordered by workflow: single loan → portfolio → stress) ──
+  { id: "underwriting-decision-support", name: "Underwriting Decision Support", tagline: "Single-loan collateral valuation with LTV forecast", segment: "Lender" },
+  { id: "portfolio-risk-monitor", name: "Portfolio Risk Monitor", tagline: "Track collateral health across your loan book", segment: "Lender" },
+  { id: "lender-portfolio-stress-test", name: "Lender Portfolio Stress Test", tagline: "What-if depreciation scenarios on your loan book", segment: "Lender" },
+  { id: "ev-collateral-risk", name: "EV Collateral Risk Monitor", tagline: "EV vs ICE depreciation risk tracking", segment: "Lender" },
+
+  // ── Analyst (3 apps) ──
   { id: "earnings-signal-dashboard", name: "Earnings Signal Dashboard", tagline: "Pre-earnings channel check for auto tickers", segment: "Analyst" },
   { id: "watchlist-monitor", name: "Watchlist Monitor", tagline: "Morning signal scan across your portfolio", segment: "Analyst" },
   { id: "dealer-group-scorecard", name: "Dealer Group Scorecard", tagline: "Benchmark public dealer groups", segment: "Analyst" },
-  { id: "portfolio-risk-monitor", name: "Portfolio Risk Monitor", tagline: "Track collateral health across your loan book", segment: "Lender" },
-  { id: "ev-collateral-risk", name: "EV Collateral Risk Monitor", tagline: "EV vs ICE depreciation risk tracking", segment: "Lender" },
+
+  // ── Insurer (2 apps) ──
   { id: "claims-valuation-workbench", name: "Claims Valuation Workbench", tagline: "Total-loss determination with market evidence", segment: "Insurer" },
+  { id: "insurance-premium-benchmarker", name: "Insurance Premium Benchmarker", tagline: "Segment-level replacement cost and risk analysis", segment: "Insurer" },
+
+  // ── Manufacturer (2 apps) ──
   { id: "brand-command-center", name: "Brand Command Center", tagline: "Your brands vs the competition", segment: "Manufacturer" },
   { id: "regional-demand-allocator", name: "Regional Demand Allocator", tagline: "Allocate inventory where demand is hottest", segment: "Manufacturer" },
+
+  // ── Auction House (2 apps) ──
   { id: "auction-lane-planner", name: "Auction Lane Planner", tagline: "Plan lanes, price consignments, target buyers", segment: "Auction House" },
-  { id: "territory-pipeline", name: "Territory Pipeline", tagline: "Find dealers who need floor plan", segment: "Lender Sales" },
+  { id: "auction-arbitrage-finder", name: "Auction Arbitrage Finder", tagline: "Wholesale vs retail spread — find profit opportunities", segment: "Auction House" },
+
+  // ── Wholesaler (1 app) ──
+  { id: "wholesale-vehicle-router", name: "Wholesale Vehicle Router", tagline: "Paste VINs, get dealer-match rankings", segment: "Wholesaler" },
+
+  // ── Cross-Segment (3 apps) ──
   { id: "ev-market-monitor", name: "EV Market Monitor", tagline: "The EV transition in one dashboard", segment: "Cross-Segment" },
+  { id: "vin-history-detective", name: "VIN History Detective", tagline: "Full listing timeline — dealer hops, price changes, red flags", segment: "Cross-Segment" },
+  { id: "market-anomaly-detector", name: "Market Anomaly Detector", tagline: "Find underpriced vehicles and pricing outliers", segment: "Cross-Segment" },
+  { id: "uk-market-trends", name: "UK Market Trends", tagline: "Macro UK automotive market intelligence", segment: "Cross-Segment" },
+
+  // ── Consumer (UK) (1 app) ──
+  { id: "uk-market-explorer", name: "UK Market Explorer", tagline: "Search and compare UK car listings in GBP", segment: "Consumer (UK)" },
+
+  // ── Dealer (UK) (1 app) ──
+  { id: "uk-dealer-pricing", name: "UK Dealer Pricing", tagline: "UK lot inventory priced against the market", segment: "Dealer (UK)" },
+
+  // ── Auto Media (1 app) ──
+  { id: "auto-journalist-briefing", name: "Auto Journalist Briefing", tagline: "One-page market briefing with quotable data points", segment: "Auto Media" },
+
+  // ── Fleet Manager (1 app) ──
+  { id: "fleet-lifecycle-manager", name: "Fleet Lifecycle Manager", tagline: "Fleet values, depreciation, and replacement planning", segment: "Fleet Manager" },
+
+  // ── Rental/Subscription (1 app) ──
+  { id: "rental-fleet-valuator", name: "Rental Fleet Valuator", tagline: "Mileage-adjusted fleet valuation with rotation timing", segment: "Rental/Subscription" },
+
+  // ── Lender Sales (1 app) ──
+  { id: "territory-pipeline", name: "Territory Pipeline", tagline: "Find dealers who need floor plan", segment: "Lender Sales" },
+
+  // ── Chat Demos (7 apps — each uses a different chat SDK) ──
+  { id: "chat-vercel-ai", name: "AI Car Advisor (Vercel AI SDK)", tagline: "Conversational car shopping with Claude streaming", segment: "Chat Demos" },
+  { id: "chat-copilotkit", name: "Dashboard Copilot (CopilotKit)", tagline: "AI copilot overlay on existing dashboards", segment: "Chat Demos" },
+  { id: "chat-assistant-ui", name: "MarketCheck Chat (assistant-ui)", tagline: "Custom-branded chat with rich tool result cards", segment: "Chat Demos" },
+  { id: "chat-sdk-bot", name: "Multi-Platform Bot (Chat SDK)", tagline: "One bot for Slack, Discord, Telegram, and Teams", segment: "Chat Demos" },
+  { id: "chat-chainlit", name: "Market Analyst (Chainlit)", tagline: "Python MCP chat with tool execution visualization", segment: "Chat Demos" },
+  { id: "chat-streamlit", name: "Quick Market Check (Streamlit)", tagline: "Lightweight Python chat for data teams", segment: "Chat Demos" },
+  { id: "chat-langchain", name: "AI Agent Explorer (LangChain)", tagline: "Autonomous agent with visible reasoning chains", segment: "Chat Demos" },
 ];
 
 // ── State ───────────────────────────────────────────────────────────────
@@ -1294,14 +1362,30 @@ function renderTopNav() {
 // ── App Open Modal ──────────────────────────────────────────────────────
 
 function showAppOpenModal(appId: string, appName: string) {
+  const isChatApp = appId.startsWith("chat-");
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
 
   overlay.innerHTML = `
     <div class="modal">
       <h3>Open ${appName}</h3>
-      <p>This app works with demo data or live MarketCheck data. How would you like to proceed?</p>
-      <div class="auth-field" id="modal-key-field" style="display:none;">
+      <p>${isChatApp
+        ? "This chat app requires an LLM API key and a MarketCheck API key to work."
+        : "This app works with demo data or live MarketCheck data. How would you like to proceed?"}</p>
+      <div class="auth-field" id="modal-key-field" style="display:${isChatApp ? "block" : "none"};">
+        ${isChatApp ? `
+        <label class="auth-label">LLM Provider</label>
+        <select class="auth-input" id="modal-llm-provider" style="margin-bottom:12px;cursor:pointer;">
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openai">OpenAI (GPT)</option>
+          <option value="gemini">Google (Gemini)</option>
+        </select>
+        <label class="auth-label" id="modal-llm-key-label">Anthropic API Key</label>
+        <input class="auth-input" id="modal-llm-key" type="password" placeholder="sk-ant-..." />
+        <div class="auth-hint" style="margin-top:6px;margin-bottom:16px;" id="modal-llm-hint">
+          Get one at <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>
+        </div>
+        ` : ""}
         <label class="auth-label">MarketCheck API Key</label>
         <input class="auth-input" id="modal-api-key" type="password" placeholder="Enter your API key" />
         <div class="auth-hint" style="margin-top:6px;">
@@ -1309,8 +1393,8 @@ function showAppOpenModal(appId: string, appName: string) {
         </div>
       </div>
       <div class="modal-actions">
-        <button class="btn btn-secondary" id="modal-demo">View Demo</button>
-        <button class="btn btn-primary" id="modal-live">Use API Key</button>
+        ${isChatApp ? "" : '<button class="btn btn-secondary" id="modal-demo">View Demo</button>'}
+        <button class="btn btn-primary" id="modal-live">${isChatApp ? "Open Chat" : "Use API Key"}</button>
       </div>
     </div>
   `;
@@ -1325,28 +1409,78 @@ function showAppOpenModal(appId: string, appName: string) {
   const keyField = document.getElementById("modal-key-field")!;
   const keyInput = document.getElementById("modal-api-key") as HTMLInputElement;
 
-  // Demo button → open app with no key
-  document.getElementById("modal-demo")!.addEventListener("click", () => {
+  // LLM provider switching (chat apps only)
+  if (isChatApp) {
+    const providerSelect = document.getElementById("modal-llm-provider") as HTMLSelectElement;
+    const llmKeyInput = document.getElementById("modal-llm-key") as HTMLInputElement;
+    const llmKeyLabel = document.getElementById("modal-llm-key-label")!;
+    const llmHint = document.getElementById("modal-llm-hint")!;
+
+    const providerConfig: Record<string, { label: string; placeholder: string; hint: string }> = {
+      anthropic: { label: "Anthropic API Key", placeholder: "sk-ant-...", hint: 'Get one at <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>' },
+      openai: { label: "OpenAI API Key", placeholder: "sk-...", hint: 'Get one at <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com</a>' },
+      gemini: { label: "Google AI API Key", placeholder: "AIza...", hint: 'Get one at <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com</a>' },
+    };
+
+    // Restore saved provider
+    const savedProvider = localStorage.getItem("mc_llm_provider") ?? "anthropic";
+    providerSelect.value = savedProvider;
+    const cfg = providerConfig[savedProvider];
+    llmKeyLabel.textContent = cfg.label;
+    llmKeyInput.placeholder = cfg.placeholder;
+    llmHint.innerHTML = cfg.hint;
+    llmKeyInput.value = localStorage.getItem("mc_llm_key") ?? "";
+    keyInput.value = getApiKey() ?? "";
+
+    providerSelect.addEventListener("change", () => {
+      const cfg = providerConfig[providerSelect.value];
+      llmKeyLabel.textContent = cfg.label;
+      llmKeyInput.placeholder = cfg.placeholder;
+      llmHint.innerHTML = cfg.hint;
+      llmKeyInput.value = "";
+    });
+  }
+
+  // Demo button → open app with no key (non-chat apps only)
+  document.getElementById("modal-demo")?.addEventListener("click", () => {
     overlay.remove();
     window.open(`/apps/${appId}/dist/index.html`, "_blank");
   });
 
   // Live button → toggle key input or open with key
   document.getElementById("modal-live")!.addEventListener("click", () => {
-    if (keyField.style.display === "none") {
+    if (!isChatApp && keyField.style.display === "none") {
       // First click: show key input
       keyField.style.display = "block";
       keyInput.value = getApiKey() ?? "";
       keyInput.focus();
       document.getElementById("modal-live")!.textContent = "Open with Key";
     } else {
-      // Second click: save key and open
-      const key = keyInput.value.trim();
-      if (key) {
-        localStorage.setItem("mc_api_key", key);
+      const mcKey = keyInput.value.trim();
+
+      if (isChatApp) {
+        // Chat app: save both keys + provider
+        const llmKey = (document.getElementById("modal-llm-key") as HTMLInputElement)?.value?.trim();
+        const provider = (document.getElementById("modal-llm-provider") as HTMLSelectElement)?.value;
+
+        if (!llmKey || !mcKey) {
+          alert("Both API keys are required for chat apps.");
+          return;
+        }
+        localStorage.setItem("mc_llm_key", llmKey);
+        localStorage.setItem("mc_llm_provider", provider);
+        localStorage.setItem("mc_api_key", mcKey);
         refreshBadges();
         overlay.remove();
-        window.open(`/apps/${appId}/dist/index.html?api_key=${encodeURIComponent(key)}`, "_blank");
+        window.open(`/apps/${appId}/dist/index.html?api_key=${encodeURIComponent(mcKey)}`, "_blank");
+      } else {
+        // Regular app: save MC key only
+        if (mcKey) {
+          localStorage.setItem("mc_api_key", mcKey);
+          refreshBadges();
+          overlay.remove();
+          window.open(`/apps/${appId}/dist/index.html?api_key=${encodeURIComponent(mcKey)}`, "_blank");
+        }
       }
     }
   });
@@ -1372,16 +1506,16 @@ function renderHero() {
   content.innerHTML = `
     <div class="hero-badge"><img src="https://34682200.delivery.rocketcdn.me/wp-content/uploads/2024/05/cropped-MC-Icon.png.webp" alt="MC" style="height:16px;vertical-align:middle;margin-right:6px;border-radius:3px;" />Powered by MarketCheck Data</div>
     <h1><img src="https://34682200.delivery.rocketcdn.me/wp-content/uploads/2024/05/cropped-MC-Icon.png.webp" alt="MarketCheck" style="height:56px;vertical-align:middle;margin-right:12px;border-radius:8px;" />MarketCheck Apps</h1>
-    <p class="subtitle">25 interactive automotive market intelligence dashboards. Real-time data for dealers, appraisers, lenders, analysts, manufacturers, and consumers. Fork them, use as reference, or build your own.</p>
+    <p class="subtitle">45 interactive automotive market intelligence dashboards. Real-time data for dealers, appraisers, lenders, analysts, manufacturers, insurers, wholesalers, fleet managers, and consumers. Fork them, use as reference, or build your own.</p>
     <div class="hero-ctas">
       <a href="#apps" class="btn btn-primary">Explore Apps &#8594;</a>
       <button class="btn btn-secondary" id="btn-connect">Connect Live Data</button>
       <button class="btn btn-secondary" id="btn-share-page" style="gap:6px;">&#8599; Share</button>
     </div>
     <div class="hero-stats">
-      <div class="hero-stat"><div class="val">26</div><div class="lbl">Apps</div></div>
-      <div class="hero-stat"><div class="val">11</div><div class="lbl">Segments</div></div>
-      <div class="hero-stat"><div class="val">9</div><div class="lbl">API Tools</div></div>
+      <div class="hero-stat"><div class="val">45</div><div class="lbl">Apps</div></div>
+      <div class="hero-stat"><div class="val">17</div><div class="lbl">Segments</div></div>
+      <div class="hero-stat"><div class="val">12</div><div class="lbl">API Tools</div></div>
       <div class="hero-stat"><div class="val">4</div><div class="lbl">Modes</div></div>
     </div>
   `;
@@ -1503,7 +1637,7 @@ function renderModes() {
   grid.className = "mode-grid";
 
   const modes = [
-    { color: "yellow", icon: "&#9654;", badge: "DEMO", title: "Demo Mode", desc: "Browse all 25 apps with realistic sample data. No API key required.", link: null },
+    { color: "yellow", icon: "&#9654;", badge: "DEMO", title: "Demo Mode", desc: "Browse all 45 apps with realistic sample data. No API key required.", link: null },
     { color: "green", icon: "&#9919;", badge: "LIVE", title: "Live Data", desc: "Enter your MarketCheck API key to see real market data in any app.", link: '<a class="mode-link" href="https://developers.marketcheck.com" target="_blank">Get a free API key &rarr;</a>' },
     { color: "purple", icon: "&lt;/&gt;", badge: "EMBED", title: "Embed in Your Portal", desc: "Embed any app in your website using an iframe with secure OAuth tokens.", link: '<button class="mode-link" id="btn-show-embed">See embed instructions &rarr;</button>' },
     { color: "blue", icon: "&#10023;", badge: "MCP", title: "AI Assistants", desc: "Use inside Claude, VS Code Copilot, Goose, and other MCP-compatible AI hosts.", link: '<button class="mode-link" id="btn-show-mcp">Setup instructions &rarr;</button>' },

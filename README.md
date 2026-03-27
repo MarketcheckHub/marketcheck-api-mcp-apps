@@ -1,10 +1,12 @@
-# MarketCheck MCP Apps
+# MarketCheck API & MCP Apps
 
 <img src="https://34682200.delivery.rocketcdn.me/wp-content/uploads/2024/05/cropped-MC-Icon.png.webp" alt="MarketCheck" width="48" align="left" style="margin-right:12px;" />
 
-**25 interactive automotive market intelligence dashboards** — usable as MCP UI Apps inside AI assistants, as a standalone web showcase, or as embeddable iframe widgets in your own portal.
+**45 interactive automotive market intelligence dashboards + 7 AI chat demos** — usable as MCP UI Apps inside AI assistants, as a standalone web showcase, as embeddable iframe widgets, or as conversational AI chat interfaces.
 
-Powered by [MarketCheck](https://www.marketcheck.com/) real-time automotive data — VIN decoding, ML price predictions, active/sold inventory, and aggregated market analytics.
+Powered by [MarketCheck](https://www.marketcheck.com/) real-time automotive data — VIN decoding, ML price predictions, active/sold inventory, and aggregated market analytics. The chat demos showcase the same API capabilities through 7 different chat SDKs.
+
+**Live demo:** [apps.marketcheck.com](https://apps.marketcheck.com)
 
 ---
 
@@ -12,10 +14,10 @@ Powered by [MarketCheck](https://www.marketcheck.com/) real-time automotive data
 
 | Mode | Description | Auth Required |
 |------|-------------|---------------|
-| **Demo** | Browse all 25 apps with realistic sample data | None |
-| **Live Data** | Connect your MarketCheck API key for real market data | API Key |
+| **Demo** | Browse all 45 apps with realistic sample data | None |
+| **Live Data** | Enter your MarketCheck API key for real market data | API Key (entered in the app UI) |
 | **Embed** | Embed apps in your website/portal via iframe | OAuth Access Token (secure, 6hr TTL) |
-| **MCP / AI** | Use inside Claude, VS Code Copilot, Goose, and other MCP hosts | API Key (server env) |
+| **MCP / AI** | Use inside Claude, VS Code Copilot, Goose, and other MCP hosts | API Key (server-side env var) |
 
 Don't have an API key? [Sign up free at developers.marketcheck.com](https://developers.marketcheck.com)
 
@@ -23,11 +25,17 @@ Don't have an API key? [Sign up free at developers.marketcheck.com](https://deve
 
 ## Quick Start
 
+### Live Demo (hosted)
+
+Visit [apps.marketcheck.com](https://apps.marketcheck.com) — all 45 apps are available in demo mode. Enter your API key in the settings gear to switch to live data.
+
+### Self-hosted
+
 ```bash
 # Install dependencies
 npm install
 
-# Build everything (gallery + 25 apps + server)
+# Build everything (gallery + 45 apps + server)
 npm run build
 
 # Start the server
@@ -35,7 +43,7 @@ npm run serve
 ```
 
 Then open:
-- **Gallery:** http://localhost:3001/ — browse all 25 apps, enter API key
+- **Gallery:** http://localhost:3001/ — browse all 45 apps
 - **MCP endpoint:** http://localhost:3001/mcp — for AI assistant connectors
 - **Any app directly:** http://localhost:3001/apps/{app-name}/dist/index.html
 
@@ -44,236 +52,331 @@ Then open:
 Open any built HTML file directly in your browser — all apps have mock data:
 
 ```bash
-open packages/apps/used-car-market-index/dist/index.html
+open packages/apps/vin-market-report/dist/index.html
 open packages/apps/deal-evaluator/dist/index.html
-open packages/apps/trade-in-estimator/dist/index.html
+open packages/apps/car-search-app/dist/index.html
 ```
 
-### Test with MCP test host
+---
+
+## Connecting as an MCP Server
+
+### MCP Server URL
+
+If hosted at `apps.marketcheck.com`:
+
+```
+https://apps.marketcheck.com/mcp
+```
+
+### Authentication for MCP Mode
+
+There are **two ways** to authenticate:
+
+#### Option 1: API key in the MCP URL (recommended for individual users)
+
+Pass your MarketCheck API key as a query parameter on the MCP URL:
+
+```
+https://apps.marketcheck.com/mcp?api_key=YOUR_API_KEY
+```
+
+This lets each user provide their own key. No server configuration needed.
+
+#### Option 2: Server-side environment variable (recommended for shared/hosted deployments)
+
+Set `MARKETCHECK_API_KEY` on the server. All connected MCP clients share this key automatically — users don't need to provide one.
 
 ```bash
-# Terminal 1: Start server
-npm run serve
-
-# Terminal 2: Run the official MCP test host
-git clone https://github.com/modelcontextprotocol/ext-apps.git /tmp/ext-apps
-cd /tmp/ext-apps/examples/basic-host
-npm install
-SERVERS='["http://localhost:3001/mcp"]' npm start
-# → Open http://localhost:8080, pick a tool, call it, see the app render
+MARKETCHECK_API_KEY=your_api_key npm run serve
 ```
 
-### Test with Claude
+**Priority order:** If a client provides `?api_key=` in the URL, it takes precedence over the server env var for that request. If no URL key is provided, the env var is used as fallback.
 
-```bash
-# Terminal 1: Start server
-npm run serve
+Don't have an API key? [Sign up free at developers.marketcheck.com](https://developers.marketcheck.com)
 
-# Terminal 2: Tunnel to internet
-npx cloudflared tunnel --url http://localhost:3001
-```
+### Setting up in Claude
 
-Copy the tunnel URL, then in Claude:
 1. Go to **Settings → Connectors → Add Custom Connector**
-2. Paste the URL with `/mcp` suffix (e.g., `https://random-name.trycloudflare.com/mcp`)
-3. Start a new chat and ask Claude to use any tool
+2. Enter the MCP server URL:
+   - With your own key: `https://apps.marketcheck.com/mcp?api_key=YOUR_API_KEY`
+   - Without key (uses server default): `https://apps.marketcheck.com/mcp`
+3. Start a new chat and ask Claude to use any tool (e.g. "Evaluate this deal: VIN 5TDJSKFC2NS055758")
 
 > Custom connectors require a paid Claude plan (Pro, Max, or Team).
 
----
+### Setting up in Claude Code / VS Code / Other MCP Clients
 
-## All 25 Apps
+Add to your MCP client configuration:
 
-### Consumer Apps
-
-| # | App | Tool Name | Description |
-|---|-----|-----------|-------------|
-| 25 | [Used Car Market Index](#app-25-used-car-market-index) | `get-market-index` | Stock-ticker-style dashboard for the used car market. Track prices like Wall Street tracks stocks. |
-| 7 | [Trade-In Estimator](#app-7-trade-in-estimator) | `estimate-trade-in` | Instant 3-tier trade-in value (private party / dealer / cash offer) with sold comp evidence. |
-| 5 | [Deal Evaluator](#app-5-deal-evaluator) | `evaluate-deal` | Enter a VIN, get a Buy/Negotiate/Pass verdict with gauge, negotiation toolkit, and alternatives. |
-| 6 | [Car Search & Compare](#app-6-car-search--compare) | `search-cars`, `compare-cars` | Visual car shopping with filters, photo cards, badges, and side-by-side comparison. |
-| 24 | [OEM Incentives Explorer](#app-24-oem-incentives-explorer) | `oem-incentives-explorer` | Search cash-back, APR, and lease deals by ZIP. Compare across brands. Savings calculator. |
-
-### Appraiser Apps
-
-| # | App | Tool Name | Description |
-|---|-----|-----------|-------------|
-| 1 | [Appraiser Workbench](#app-1-appraiser-workbench) | `appraiser-workbench` | Multi-panel valuation studio — retail/wholesale predictions, active/sold comps, price history timeline. |
-| 2 | [Comparables Explorer](#app-2-comparables-explorer) | `comparables-explorer` | Price distribution histogram + price-vs-mileage scatter plot with percentile positioning. |
-| 3 | [Depreciation Analyzer](#app-3-depreciation-analyzer) | `depreciation-analyzer` | Multi-model depreciation curves, segment comparison, geographic variance, brand residual rankings. |
-| 4 | [Market Trends Dashboard](#app-4-market-trends-dashboard) | `market-trends-dashboard` | Macro market view — movers, segment donut, brand residuals, state rankings, markup tracker. |
-
-### Dealer Apps
-
-| # | App | Tool Name | Description |
-|---|-----|-----------|-------------|
-| 8 | [Lot Pricing Dashboard](#app-8-lot-pricing-dashboard) | `scan-lot-pricing` | Full lot inventory with market price gaps, aging heatmap, floor plan burn, and stocking hot list. |
-| 9 | [Stocking Intelligence](#app-9-stocking-intelligence) | `stocking-intelligence` | Demand heatmap, buy/avoid lists, and VIN checker for auction run-list evaluation. |
-
-### Dealership Group Apps
-
-| # | App | Tool Name | Description |
-|---|-----|-----------|-------------|
-| 10 | [Group Operations Center](#app-10-group-operations-center) | `group-operations-center` | Multi-location health cards, alert feed, cross-store transfer recommendations. |
-| 11 | [Location Benchmarking](#app-11-location-benchmarking) | `location-benchmarking` | Rooftop-vs-rooftop comparison across 4 KPIs with Canvas bar charts. |
-| 12 | [Inventory Balancer](#app-12-inventory-balancer) | `inventory-balancer` | Supply/demand matrix with specific vehicle transfer recommendations. |
-
-### Analyst Apps
-
-| # | App | Tool Name | Description |
-|---|-----|-----------|-------------|
-| 13 | [Earnings Signal Dashboard](#app-13-earnings-signal-dashboard) | `earnings-signal-dashboard` | Pre-earnings 6-dimension channel check with bull/bear scenarios for auto tickers. |
-| 14 | [Watchlist Monitor](#app-14-watchlist-monitor) | `watchlist-monitor` | Morning signal scan across tracked tickers with sparklines and priority alerts. |
-| 15 | [Dealer Group Scorecard](#app-15-dealer-group-scorecard) | `dealer-group-scorecard` | Benchmark 8 public dealer groups with radar charts and peer matrix. |
-
-### Lender Apps
-
-| # | App | Tool Name | Description |
-|---|-----|-----------|-------------|
-| 16 | [Portfolio Risk Monitor](#app-16-portfolio-risk-monitor) | `portfolio-risk-monitor` | LTV distribution histogram, underwater loan alerts, segment exposure donut, depreciation heatmap. |
-| 17 | [EV Collateral Risk Monitor](#app-17-ev-collateral-risk-monitor) | `ev-collateral-risk` | EV vs ICE depreciation gap curves, brand risk table, state adoption heatmap, advance rate recs. |
-
-### Insurer App
-
-| # | App | Tool Name | Description |
-|---|-----|-----------|-------------|
-| 18 | [Claims Valuation Workbench](#app-18-claims-valuation-workbench) | `claims-valuation` | Total-loss determination with settlement range, comparable evidence, and replacement options. |
-
-### Manufacturer Apps
-
-| # | App | Tool Name | Description |
-|---|-----|-----------|-------------|
-| 19 | [Brand Command Center](#app-19-brand-command-center) | `brand-command-center` | Market share bars, pricing power scatter, model drill-down, regional heatmap, conquest analysis. |
-| 20 | [Regional Demand Allocator](#app-20-regional-demand-allocator) | `regional-demand-allocator` | State-level D/S ratios, segment mix comparison, allocation shift recommendations. |
-
-### Auction House App
-
-| # | App | Tool Name | Description |
-|---|-----|-----------|-------------|
-| 21 | [Auction Lane Planner](#app-21-auction-lane-planner) | `auction-lane-planner` | Lane planning grid, consignment pipeline, buyer targeting, run-list VIN pricer. |
-
-### Lender Sales App
-
-| # | App | Tool Name | Description |
-|---|-----|-----------|-------------|
-| 22 | [Territory Pipeline](#app-22-territory-pipeline) | `territory-pipeline` | Territory state map, dealer prospect ranking, profile cards with call prep, pipeline funnel. |
-
-### Cross-Segment App
-
-| # | App | Tool Name | Description |
-|---|-----|-----------|-------------|
-| 23 | [EV Market Monitor](#app-23-ev-market-monitor) | `ev-market-monitor` | EV adoption trends, price parity tracker, brand leaderboard, state penetration, depreciation comparison. |
-
----
-
-## App Details
-
-### App 25: Used Car Market Index
-**"The stock ticker for cars."**
-
-Track used car prices like Wall Street tracks stocks. Composite market index, segment indices (SUV, Sedan, Truck, EV, Luxury), and individual Make:Model tickers with candlestick-style charts.
-
-- **Canvas line/area chart** with volume bars, crosshair hover, multi-ticker overlay (up to 4)
-- **Sector heatmap** — body type × price tier grid colored by price change %
-- **Top Gainers / Losers / Most Active** tables
-- **Geographic comparison** — state-level pricing for any ticker
-- **Watchlist strip** with mini sparklines
-- Toggle: Absolute $ ↔ Indexed (base=100), US ↔ UK
-
-### App 7: Trade-In Estimator
-**"What's my car worth?"**
-
-Enter VIN + mileage + ZIP + condition → get three value tiers:
-1. **Private Party Value** — selling direct
-2. **Trade-In Value** — franchise dealer offer
-3. **Instant Cash Range** — independent dealer offers
-
-Each with horizontal range bars. Condition cards (Excellent/Good/Fair/Poor) recalculate instantly without API calls. Expandable "How We Got This Number" with sold comp evidence.
-
-### App 5: Deal Evaluator
-**"Should I buy this car?"**
-
-Enter a VIN → get a color-coded verdict (Great Deal / Fair / Above Market / Overpriced) with a **Canvas semicircular gauge** showing market position. Three-column layout: This Car specs, Market Context stats, Negotiation Toolkit with suggested offer and leverage points. Scrollable alternative cars row.
-
-### App 6: Car Search & Compare
-
-Visual car shopping with filter chips (body type, fuel, make, year, price, mileage), photo card grid with deal badges, and **side-by-side comparison** of up to 3 cars with auto-highlighted winner.
-
-### App 1: Appraiser Workbench
-
-Three-panel valuation studio:
-- **Left:** Retail + wholesale predictions with range bars and % of MSRP
-- **Center:** Tabbed Active Comps / Sold Comps (color-coded tables) / History (Canvas stepped line chart)
-- **Right:** Full vehicle spec card from VIN decode
-
-### App 8: Lot Pricing Dashboard
-
-Weekly dealer workflow. Full inventory with market price gaps (DROP/HOLD/RAISE badges), aging heatmap (DOM buckets), floor plan burn calculator, and stocking hot list with D/S ratios.
-
-### App 13: Earnings Signal Dashboard
-
-Pre-earnings channel check for auto tickers (F, GM, TM, TSLA, etc.). 6-dimension signal matrix (Volume, Pricing, Inventory, DOM, EV, Mix) with Canvas sparklines and individual BULL/BEAR badges. Composite signal + bull/bear scenario panel.
-
-### App 18: Claims Valuation Workbench
-
-Insurance total-loss determination. Enter VIN + damage severity + condition → get verdict banner (NOT TOTAL LOSS / LIKELY / TOTAL LOSS), settlement range bar (25th–75th percentile), comparable evidence table, regional variance, and replacement vehicle options.
-
----
-
-## Architecture
-
-```
-marketcheck-mcp-apps/
-├── package.json                    # Monorepo root (npm workspaces)
-├── tsconfig.base.json              # Shared TypeScript config
-├── scripts/build-apps.mjs          # Builds all 25 app UIs
-├── packages/
-│   ├── shared/                     # Shared utilities
-│   │   └── src/
-│   │       ├── types.ts            # Common TypeScript types
-│   │       ├── formatters.ts       # Currency, percent, signal classifiers
-│   │       ├── index-calculator.ts # Index computation, depreciation, D/S ratio
-│   │       ├── marketcheck-client.ts # Typed MarketCheck API wrapper
-│   │       └── app-template.ts     # Shared UI components (KPI cards, tables, badges)
-│   ├── server/                     # MCP server (all 25 tools)
-│   │   └── src/
-│   │       ├── index.ts            # Express + MCP server, registers all tools
-│   │       ├── register-app.ts     # Helper to register tool + UI resource pairs
-│   │       └── tools/              # 25 tool handler files
-│   └── apps/                       # 25 app UI folders
-│       ├── used-car-market-index/
-│       │   ├── package.json
-│       │   ├── vite.config.ts
-│       │   ├── index.html
-│       │   ├── src/main.ts         # Full app UI code
-│       │   └── dist/index.html     # Built single-file HTML bundle
-│       ├── trade-in-estimator/
-│       ├── deal-evaluator/
-│       └── ... (22 more)
+```json
+{
+  "mcpServers": {
+    "marketcheck-apps": {
+      "url": "https://apps.marketcheck.com/mcp?api_key=YOUR_API_KEY"
+    }
+  }
+}
 ```
 
-### How it works
+Or without a personal key (server provides its own):
 
-1. The **MCP server** registers 25 tools, each with a `_meta.ui.resourceUri` pointing to a `ui://` resource
-2. When a host (Claude, VS Code, etc.) calls a tool, it also fetches the UI resource — a **single-file HTML bundle** containing the entire app
-3. The app renders in a **sandboxed iframe** inside the host
-4. The app calls `app.callServerTool()` for data and `app.updateModelContext()` to push results back to the LLM
-5. All apps include **mock data fallback** so they work even without a live MarketCheck API key
+```json
+{
+  "mcpServers": {
+    "marketcheck-apps": {
+      "url": "https://apps.marketcheck.com/mcp"
+    }
+  }
+}
+```
 
-### Tech stack
+### How is this different from the MarketCheck MCP Data Server?
 
-- **Server:** `@modelcontextprotocol/sdk` + `@modelcontextprotocol/ext-apps` + Express
-- **UI:** Vanilla TypeScript + Canvas 2D API (no chart libraries) + `@modelcontextprotocol/ext-apps` App class
-- **Build:** Vite + `vite-plugin-singlefile` → single HTML file per app (~400KB, ~98KB gzipped)
-- **Data:** MarketCheck API (9 endpoints: VIN decode, price prediction, active/sold search, listing history, sold summary, OEM incentives, UK markets)
+MarketCheck offers **two separate MCP servers**:
+
+| Server | Purpose | Tools |
+|--------|---------|-------|
+| **MarketCheck MCP Data Server** | Raw API access — search, decode, predict, etc. | `search_active_cars`, `decode_vin_neovin`, `predict_price_with_comparables`, etc. |
+| **MarketCheck MCP Apps** (this project) | Interactive dashboards with visual UI | `evaluate-deal`, `estimate-trade-in`, `generate-vin-market-report`, etc. |
+
+**Key differences:**
+- The **Data Server** returns raw JSON data — the AI model processes and presents it
+- The **Apps Server** returns interactive HTML dashboards that render in the MCP host's UI panel — the user can interact with charts, tables, and filters directly
+- The Apps Server **calls the same MarketCheck APIs** under the hood, but wraps them in rich visual interfaces
+- You can use **both servers simultaneously** — they have different tool names and don't conflict
+
+**You do NOT need the Data Server to use the Apps Server.** Each is independent. The Apps Server has its own server-side API key and makes its own API calls.
+
+---
+
+## All 45 Apps
+
+### Consumer (9 apps)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| VIN Market Report | `generate-vin-market-report` | Complete VIN-based market intelligence report — embeddable widget |
+| Car Search & Compare | `search-cars`, `compare-cars` | Visual car shopping with filters, photo cards, and side-by-side comparison |
+| Car Search | — | Full search with SERP, vehicle details, and natural language search |
+| Deal Evaluator | `evaluate-deal` | Buy/Negotiate/Pass verdict with gauge, negotiation toolkit, and alternatives |
+| Incentive-Adjusted Deal Evaluator | `evaluate-incentive-deal` | True out-of-pocket cost after rebates and APR savings |
+| Trade-In Estimator | `estimate-trade-in` | Instant 3-tier trade-in value with sold comp evidence |
+| Used Car Market Index | `get-market-index` | Stock-ticker-style dashboard tracking used car prices |
+| OEM Incentives Explorer | `oem-incentives-explorer` | Cash back, APR, and lease deals by ZIP |
+| Incentive Deal Finder | `find-incentive-deals` | Search ALL OEM incentives by budget, not by brand |
+
+### Dealer (5 apps)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Lot Pricing Dashboard | `scan-lot-pricing` | Full lot inventory with market price gaps, aging heatmap, stocking hot list |
+| Stocking Intelligence | `stocking-intelligence` | Demand heatmap, buy/avoid lists, VIN checker |
+| Pricing Transparency Report | `generate-pricing-report` | Shareable market report dealers give buyers |
+| Dealer Inventory Fit Scorer | `score-dealer-fit` | Which cars match your sales DNA? ML-scored acquisitions |
+| Dealer Conquest Analyzer | `analyze-dealer-conquest` | Find competitors' best-sellers you should stock |
+
+### Appraiser (4 apps)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Appraiser Workbench | `appraiser-workbench` | Complete vehicle valuation studio |
+| Comparables Explorer | `comparables-explorer` | Price distribution and market positioning |
+| Depreciation Analyzer | `depreciation-analyzer` | Track how vehicles lose value over time |
+| Market Trends Dashboard | `market-trends-dashboard` | The pulse of the automotive market |
+
+### Dealership Group (3 apps)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Group Operations Center | `group-operations-center` | Every store, one screen |
+| Inventory Balancer | `inventory-balancer` | Move the right cars to the right stores |
+| Location Benchmarking | `location-benchmarking` | Rank and compare your locations |
+
+### Lender (4 apps)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Underwriting Decision Support | `evaluate-loan-application` | Single-loan collateral valuation with LTV forecast |
+| Portfolio Risk Monitor | `portfolio-risk-monitor` | Track collateral health across your loan book |
+| Lender Portfolio Stress Test | `stress-test-portfolio` | What-if depreciation scenarios on your loan book |
+| EV Collateral Risk Monitor | `ev-collateral-risk` | EV vs ICE depreciation risk tracking |
+
+### Analyst (3 apps)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Earnings Signal Dashboard | `earnings-signal-dashboard` | Pre-earnings channel check for auto tickers |
+| Watchlist Monitor | `watchlist-monitor` | Morning signal scan across your portfolio |
+| Dealer Group Scorecard | `dealer-group-scorecard` | Benchmark public dealer groups |
+
+### Insurer (2 apps)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Claims Valuation Workbench | `claims-valuation` | Total-loss determination with market evidence |
+| Insurance Premium Benchmarker | `benchmark-insurance-premiums` | Segment-level replacement cost and risk analysis |
+
+### Manufacturer (2 apps)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Brand Command Center | `brand-command-center` | Your brands vs the competition |
+| Regional Demand Allocator | `regional-demand-allocator` | Allocate inventory where demand is hottest |
+
+### Auction House (2 apps)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Auction Lane Planner | `auction-lane-planner` | Plan lanes, price consignments, target buyers |
+| Auction Arbitrage Finder | `find-auction-arbitrage` | Wholesale vs retail spread — find profit opportunities |
+
+### Wholesaler (1 app)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Wholesale Vehicle Router | `route-wholesale-vehicles` | Paste VINs, get dealer-match rankings |
+
+### Cross-Segment (4 apps)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| EV Market Monitor | `ev-market-monitor` | The EV transition in one dashboard |
+| VIN History Detective | `trace-vin-history` | Full listing timeline — dealer hops, price changes, red flags |
+| Market Anomaly Detector | `detect-market-anomalies` | Find underpriced vehicles and pricing outliers |
+| UK Market Trends | `get-uk-market-trends` | Macro UK automotive market intelligence |
+
+### Consumer UK (1 app)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| UK Market Explorer | `search-uk-cars` | Search and compare UK car listings in GBP |
+
+### Dealer UK (1 app)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| UK Dealer Pricing | `scan-uk-lot-pricing` | UK lot inventory priced against the market |
+
+### Auto Media (1 app)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Auto Journalist Briefing | `generate-market-briefing` | One-page market briefing with quotable data points |
+
+### Fleet Manager (1 app)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Fleet Lifecycle Manager | `manage-fleet-lifecycle` | Fleet values, depreciation, and replacement planning |
+
+### Rental/Subscription (1 app)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Rental Fleet Valuator | `value-rental-fleet` | Mileage-adjusted fleet valuation with rotation timing |
+
+### Lender Sales (1 app)
+
+| App | Tool Name | Description |
+|-----|-----------|-------------|
+| Territory Pipeline | `territory-pipeline` | Find dealers who need floor plan |
+
+### Chat Demos (7 apps)
+
+Each chat demo uses a different SDK to showcase MarketCheck API capabilities through conversational AI interfaces:
+
+| App | SDK | Language | Description |
+|-----|-----|----------|-------------|
+| AI Car Advisor | [Vercel AI SDK](https://ai-sdk.dev/) | TypeScript/Next.js | Reference chat with `useChat` hook, streaming, and tool visualization |
+| Dashboard Copilot | [CopilotKit](https://copilotkit.ai/) | React/Next.js | AI copilot overlay on existing dashboard UI |
+| MarketCheck Chat | [assistant-ui](https://assistant-ui.com/) | React/Next.js | Custom-branded noir theme with rich tool result cards |
+| Multi-Platform Bot | [Chat SDK](https://chat-sdk.dev/) | TypeScript | Single codebase deploys to Slack, Discord, Telegram, Teams |
+| Market Analyst | [Chainlit](https://chainlit.io/) | Python | MCP-native chat with built-in tool execution visualization |
+| Quick Market Check | [Streamlit](https://streamlit.io/) | Python | Lightweight chat for data teams |
+| AI Agent Explorer | [LangChain](https://langchain.com/) | TypeScript/Next.js | LangGraph ReAct agent with visible reasoning chains |
+
+#### Running Chat Demos
+
+**TypeScript apps (Vercel AI SDK, CopilotKit, assistant-ui, LangChain):**
+
+```bash
+cd packages/chat/vercel-ai-chat   # or copilotkit-chat, assistant-ui-chat, langchain-agent-chat
+cp .env.local.example .env.local  # Add your ANTHROPIC_API_KEY and MARKETCHECK_API_KEY
+npm install
+npm run dev
+```
+
+**Python apps (Chainlit, Streamlit):**
+
+```bash
+cd packages/chat/chainlit-chat    # or streamlit-chat
+cp .env.example .env              # Add your keys
+pip install -r requirements.txt
+
+# Chainlit:
+chainlit run app.py -w
+
+# Streamlit:
+streamlit run app.py
+```
+
+**Chat SDK Bot (Slack/Discord/Telegram):**
+
+```bash
+cd packages/chat/chat-sdk-bot
+cp .env.example .env              # Add API keys + platform bot tokens
+npm install
+npm run dev
+```
+
+---
+
+## API Access Modes
+
+Apps support three data access paths, tried in order:
+
+### 1. MCP Mode (AI assistants)
+
+When running inside an MCP host (Claude, VS Code, etc.), apps call `_safeApp.callServerTool()` which routes through the MCP server. The server uses its `MARKETCHECK_API_KEY` env var — users don't provide a key.
+
+### 2. Direct API Mode (web/embed)
+
+When loaded in a browser with an API key, apps call the MarketCheck API **directly** from the browser:
+
+```
+Browser → https://api.marketcheck.com/v2/search/car/active?api_key=KEY&...
+```
+
+No proxy or server needed. The MarketCheck API supports CORS (`Access-Control-Allow-Origin: *`).
+
+To use: enter your API key in the app's settings gear, or pass it as a URL parameter:
+
+```
+https://apps.marketcheck.com/apps/deal-evaluator/dist/index.html?api_key=YOUR_KEY
+```
+
+### 3. Demo Mode (no auth)
+
+If no API key is available, apps display realistic mock data. Every app works fully offline.
 
 ---
 
 ## Embedding Apps in Your Portal
 
-Embed any app as an iframe in your website. For security, use **OAuth access tokens** (not API keys) — tokens expire in 6 hours and can be revoked.
+Embed any app as an iframe in your website.
 
-### Step 1: Generate an OAuth Access Token
+### Option A: API Key (simple, for internal use)
+
+```html
+<iframe
+  src="https://apps.marketcheck.com/apps/deal-evaluator/dist/index.html?api_key=YOUR_KEY&embed=true&vin=5TDJSKFC2NS055758"
+  width="100%" height="700"
+  style="border:none;border-radius:8px;"
+></iframe>
+```
+
+### Option B: OAuth Token (recommended for production)
 
 Exchange your API key + client secret for a short-lived token (server-side):
 
@@ -283,11 +386,11 @@ curl -X POST https://api.marketcheck.com/oauth2/token \
   -d '{"grant_type":"client_credentials","client_id":"YOUR_API_KEY","client_secret":"YOUR_SECRET"}'
 ```
 
-### Step 2: Embed with the Token
+Then embed with the token:
 
 ```html
 <iframe
-  src="https://your-domain.com/apps/deal-evaluator/dist/index.html?access_token=TOKEN&embed=true&vin=5TDJSKFC2NS055758"
+  src="https://apps.marketcheck.com/apps/deal-evaluator/dist/index.html?access_token=TOKEN&embed=true&vin=5TDJSKFC2NS055758"
   width="100%" height="700"
   style="border:none;border-radius:8px;"
 ></iframe>
@@ -298,140 +401,121 @@ curl -X POST https://api.marketcheck.com/oauth2/token \
 | Param | Description |
 |-------|-------------|
 | `access_token` | OAuth token (secure, 6hr TTL) |
-| `api_key` | API key (for personal/internal use only) |
+| `api_key` | API key (for personal/internal use) |
 | `embed=true` | Hides chrome, full-bleed layout, auto-executes |
 | `vin` | Pre-populate VIN field |
 | `zip` | Pre-populate ZIP code |
 | `make`, `model` | Pre-populate vehicle selection |
 | `miles` | Pre-populate mileage |
 | `state` | Pre-populate state |
+| `compact=true` | Widget mode (VIN Market Report only) |
 
-### Security
+---
 
-| Auth Method | Exposure Risk | Recommended For |
-|-------------|---------------|-----------------|
-| OAuth Access Token | Low (6hr TTL, revocable) | Iframe embedding |
-| API Key in URL | Medium (doesn't expire) | Internal/personal use only |
-| API Key in server env | None | MCP server mode |
+## Architecture
 
-Generate credentials at [developers.marketcheck.com/api-keys](https://developers.marketcheck.com/api-keys)
+```
+marketcheck-api-mcp-apps/
+├── package.json                    # Monorepo root (npm workspaces)
+├── packages/
+│   ├── shared/                     # Shared utilities & types
+│   │   └── src/
+│   │       ├── types.ts            # Common TypeScript types
+│   │       ├── formatters.ts       # Currency, percent, signal classifiers
+│   │       ├── index-calculator.ts # Index computation, depreciation, D/S ratio
+│   │       └── marketcheck-client.ts # Typed MarketCheck API wrapper (server-side)
+│   ├── server/                     # MCP server (44 tools)
+│   │   └── src/
+│   │       ├── index.ts            # Express + MCP server
+│   │       ├── register-app.ts     # Helper to register tool + UI resource pairs
+│   │       ├── proxy.ts            # CORS proxy for legacy/fallback mode
+│   │       └── tools/              # 44 tool handler files
+│   ├── gallery/                    # Web gallery UI
+│   ├── apps/                       # 45 app UI folders
+│   │   ├── vin-market-report/
+│   │   │   ├── src/main.ts         # Full app UI + direct API client
+│   │   │   └── dist/index.html     # Built single-file HTML bundle
+│   │   └── ... (44 more)
+│   └── chat/                       # 7 AI chat demo apps
+│       ├── shared/                 # Shared tool definitions & prompts
+│       ├── vercel-ai-chat/         # Next.js + Vercel AI SDK
+│       ├── copilotkit-chat/        # Next.js + CopilotKit
+│       ├── assistant-ui-chat/      # Next.js + assistant-ui
+│       ├── chat-sdk-bot/           # Multi-platform bot (Slack/Discord/Telegram)
+│       ├── chainlit-chat/          # Python + Chainlit
+│       ├── streamlit-chat/         # Python + Streamlit
+│       └── langchain-agent-chat/   # Next.js + LangGraph
+├── public/                         # Vercel deployment output
+├── static/screenshots/             # App screenshots for gallery
+└── scripts/                        # Build & migration utilities
+```
+
+### How it works
+
+1. The **MCP server** registers 44 tools, each with a `_meta.ui.resourceUri` pointing to a `ui://` resource
+2. When an MCP host (Claude, VS Code, etc.) calls a tool, it also fetches the UI resource — a **single-file HTML bundle**
+3. The app renders in a **sandboxed iframe** inside the host
+4. The app calls `app.callServerTool()` for data and `app.updateModelContext()` to push results back to the LLM
+5. In web mode, apps call the **MarketCheck API directly** from the browser (no proxy needed)
+6. All apps include **mock data fallback** for demo mode
+
+### Tech stack
+
+- **Server:** `@modelcontextprotocol/sdk` + `@modelcontextprotocol/ext-apps` + Express
+- **UI:** Vanilla TypeScript + Canvas 2D API (no chart libraries)
+- **Build:** Vite + `vite-plugin-singlefile` → single HTML file per app
+- **Data:** MarketCheck API (12 endpoints: VIN decode, price prediction, active/sold search, listing history, sold summary, OEM incentives, dealer/vehicle ranking, UK markets)
+
+### MarketCheck API Endpoints
+
+| Endpoint | Path | Purpose |
+|----------|------|---------|
+| VIN Decode | `GET /v2/decode/car/neovin/{vin}/specs` | VIN to full vehicle specs |
+| Price Predict | `GET /v2/predict/car/us/marketcheck_price/comparables` | ML price prediction + comparables |
+| Search Active | `GET /v2/search/car/active` | Current dealer listings with filters |
+| Search Recent | `GET /v2/search/car/recents` | Recently sold/expired listings |
+| Car History | `GET /v2/history/car/{vin}` | Listing timeline for a VIN |
+| Sold Summary | `GET /api/v1/sold-vehicles/summary` | Aggregated market analytics |
+| OEM Incentives | `GET /v2/incentives/by-zip` | Manufacturer incentives by ZIP |
+| Rank Dealers | `GET /v2/rank/dealers` | Dealer-vehicle match scoring |
+| Rank Vehicles | `GET /v2/rank/vehicles` | Vehicle-dealer fit scoring |
+| UK Active | `GET /v2/search/car/uk/active` | UK market active listings |
+| UK Recent | `GET /v2/search/car/uk/recents` | UK market recent listings |
 
 ---
 
 ## Deployment
 
+### Hosted at apps.marketcheck.com
+
+The production instance is hosted at [apps.marketcheck.com](https://apps.marketcheck.com).
+
+- **Gallery:** `https://apps.marketcheck.com/`
+- **MCP endpoint:** `https://apps.marketcheck.com/mcp`
+- **Individual app:** `https://apps.marketcheck.com/apps/{app-name}/dist/index.html`
+- **Health check:** `https://apps.marketcheck.com/health`
+
 ### Environment Variables
 
 ```bash
-MARKETCHECK_API_KEY=your_api_key    # Required for MCP mode live data
-MC_API_BASE=https://mc-api.marketcheck.com/v2  # Default
+MARKETCHECK_API_KEY=your_api_key    # Required for MCP mode
 PORT=3001                           # Server port (default 3001)
 ```
 
-### Option 1: Vercel (recommended for serverless)
+### Self-hosting Options
 
-Yes — these apps can be hosted on Vercel. The server uses stateless HTTP mode (`sessionIdGenerator: undefined`), which is compatible with Vercel's serverless functions.
-
-```bash
-npm install -g vercel
-```
-
-Create `vercel.json` in the project root:
-
-```json
-{
-  "buildCommand": "npm run build",
-  "functions": {
-    "api/mcp.ts": {
-      "maxDuration": 30
-    }
-  },
-  "rewrites": [
-    { "source": "/mcp", "destination": "/api/mcp" }
-  ]
-}
-```
-
-Create `api/mcp.ts`:
-
-```typescript
-import type { VercelRequest, VercelResponse } from "@vercel/node";
-// Import and initialize your MCP server here
-// Handle req/res with StreamableHTTPServerTransport
-```
-
-Then deploy:
+**Vercel (recommended for serverless):**
 
 ```bash
-vercel --prod
+npx vercel --prod
 ```
 
-> **Note:** Each tool call is a single HTTP POST → response cycle, which fits Vercel's serverless model well. The 30-second timeout is sufficient for most tools. Set `MARKETCHECK_API_KEY` in Vercel's environment variables.
-
-### Option 2: Google Cloud Run (container)
-
-```bash
-# Build container
-docker build -t marketcheck-mcp-apps .
-docker tag marketcheck-mcp-apps gcr.io/YOUR_PROJECT/marketcheck-mcp-apps
-
-# Push and deploy
-docker push gcr.io/YOUR_PROJECT/marketcheck-mcp-apps
-gcloud run deploy marketcheck-mcp-apps \
-  --image gcr.io/YOUR_PROJECT/marketcheck-mcp-apps \
-  --port 3001 \
-  --set-env-vars MARKETCHECK_API_KEY=your_key \
-  --allow-unauthenticated
-```
-
-### Option 3: Railway / Render / Fly.io
-
-Any platform that supports Node.js:
-
-```bash
-# Railway
-railway up
-
-# Render — set build command: npm run build
-# Start command: npm run serve
-
-# Fly.io
-fly launch
-fly deploy
-```
-
-### Option 4: Self-hosted (VPS, EC2, etc.)
+**Docker / Cloud Run / Railway / Render / Fly.io:**
 
 ```bash
 npm install && npm run build
 PORT=3001 MARKETCHECK_API_KEY=your_key npm run serve
 ```
-
-### Do I need to host on cloud?
-
-**For personal/local use:** No. Run `npm run serve` locally and use `cloudflared` tunnel to connect to Claude. The apps work fully offline with mock data too.
-
-**For team/production use:** Yes, host on any cloud platform. The server is a standard HTTP service — no WebSockets, no sessions, no state. Any platform that can run a Node.js HTTP server works.
-
-**The apps themselves don't need separate hosting.** They're served as MCP resources from the server — the HTML is bundled into the server response. You only host the single MCP server.
-
----
-
-## MarketCheck API Tools
-
-The server wraps these MarketCheck API endpoints as MCP tools:
-
-| Tool | Endpoint | Purpose |
-|------|----------|---------|
-| `decode_vin_neovin` | `POST /decode/neovin` | VIN → full specs (year, make, model, trim, MSRP, engine, etc.) |
-| `predict_price_with_comparables` | `GET /pricing/predict` | ML price prediction with comparable vehicle citations |
-| `search_active_cars` | `GET /search/car/active` | Current dealer listings with 100+ filters, stats, facets |
-| `search_past_90_days` | `GET /search/car/past90` | Recently sold/expired listings for transaction evidence |
-| `get_car_history` | `GET /history/listings` | Full listing timeline for a VIN across dealers |
-| `get_sold_summary` | `GET /api/v1/sold-vehicles/summary` | Aggregated sold data with ranking/grouping dimensions |
-| `search_oem_incentives_by_zip` | `GET /incentives/by-zip` | Manufacturer incentives by ZIP code |
-| `search_uk_active_cars` | `GET /search/car/uk/active` | UK market active listings |
-| `search_uk_recent_cars` | `GET /search/car/uk/recents` | UK market recent/sold listings |
 
 ---
 
@@ -439,6 +523,7 @@ The server wraps these MarketCheck API endpoints as MCP tools:
 
 MCP Apps are supported by:
 - [Claude](https://claude.ai) (web) and [Claude Desktop](https://claude.ai/download)
+- [Claude Code](https://claude.ai/code) (CLI and VS Code extension)
 - [VS Code GitHub Copilot](https://code.visualstudio.com/)
 - [Goose](https://block.github.io/goose/)
 - [Postman](https://postman.com)
@@ -448,6 +533,12 @@ MCP Apps are supported by:
 
 ## Development
 
+### Build all apps
+
+```bash
+npm run build
+```
+
 ### Build a single app
 
 ```bash
@@ -455,27 +546,22 @@ cd packages/apps/deal-evaluator
 npx vite build
 ```
 
-### Build all apps
-
-```bash
-npm run build
-```
-
 ### Add a new app
 
 1. Create `packages/apps/my-new-app/` with `package.json`, `tsconfig.json`, `vite.config.ts`, `index.html`, `src/main.ts`
 2. Create `packages/server/src/tools/my-new-app.ts` with the tool handler
-3. Import and register in `packages/server/src/index.ts`
-4. Run `npm install && npm run build`
+3. Add to `packages/server/src/index.ts` toolModules array
+4. Add to `packages/gallery/src/main.ts` APPS array
+5. Run `npm install && npm run build`
 
 ### Project stats
 
 | Metric | Value |
 |--------|-------|
-| Total apps | 25 |
-| Total TypeScript lines | ~24,000 |
-| Source files | 163 |
-| Built HTML bundles | 25 (~400KB each, ~98KB gzipped) |
+| Total apps | 45 dashboard apps + 7 chat demos |
+| Segments | 18 (including Chat Demos) |
+| API endpoints used | 12 |
+| Built HTML bundles | 45 (~400KB each, ~98KB gzipped) |
 | External chart libraries | 0 (all Canvas 2D) |
 | Mock data | Every app has full offline fallback |
 

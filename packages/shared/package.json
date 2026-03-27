@@ -3,6 +3,15 @@
   "version": "1.0.0",
   "type": "module",
   "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./app-template": "./src/app-template.ts",
+    "./chat-engine": "./src/chat-engine.ts",
+    "./data-provider": "./src/data-provider.ts",
+    "./formatters": "./src/formatters.ts",
+    "./types": "./src/types.ts",
+    "./index-calculator": "./src/index-calculator.ts"
+  },
   "scripts": {
     "build": "tsc"
   },
