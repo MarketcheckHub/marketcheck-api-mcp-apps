@@ -150,137 +150,137 @@ MarketCheck offers **two separate MCP servers**:
 
 ---
 
-## All 45 Apps
+## All 52 Apps
 
 ### Consumer (9 apps)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| VIN Market Report | `generate-vin-market-report` | Complete VIN-based market intelligence report — embeddable widget |
-| Car Search & Compare | `search-cars`, `compare-cars` | Visual car shopping with filters, photo cards, and side-by-side comparison |
-| Car Search | — | Full search with SERP, vehicle details, and natural language search |
-| Deal Evaluator | `evaluate-deal` | Buy/Negotiate/Pass verdict with gauge, negotiation toolkit, and alternatives |
-| Incentive-Adjusted Deal Evaluator | `evaluate-incentive-deal` | True out-of-pocket cost after rebates and APR savings |
-| Trade-In Estimator | `estimate-trade-in` | Instant 3-tier trade-in value with sold comp evidence |
-| Used Car Market Index | `get-market-index` | Stock-ticker-style dashboard tracking used car prices |
-| OEM Incentives Explorer | `oem-incentives-explorer` | Cash back, APR, and lease deals by ZIP |
-| Incentive Deal Finder | `find-incentive-deals` | Search ALL OEM incentives by budget, not by brand |
+| [VIN Market Report](packages/apps/vin-market-report/) | `generate-vin-market-report` | Complete VIN-based market intelligence report — embeddable widget |
+| [Car Search & Compare](packages/apps/car-search-compare/) | `search-cars`, `compare-cars` | Visual car shopping with filters, photo cards, and side-by-side comparison |
+| [Car Search](packages/apps/car-search-app/) | — | Full search with SERP, vehicle details, and natural language search |
+| [Deal Evaluator](packages/apps/deal-evaluator/) | `evaluate-deal` | Buy/Negotiate/Pass verdict with gauge, negotiation toolkit, and alternatives |
+| [Incentive-Adjusted Deal Evaluator](packages/apps/incentive-adjusted-deal-eval/) | `evaluate-incentive-deal` | True out-of-pocket cost after rebates and APR savings |
+| [Trade-In Estimator](packages/apps/trade-in-estimator/) | `estimate-trade-in` | Instant 3-tier trade-in value with sold comp evidence |
+| [Used Car Market Index](packages/apps/used-car-market-index/) | `get-market-index` | Stock-ticker-style dashboard tracking used car prices |
+| [OEM Incentives Explorer](packages/apps/oem-incentives-explorer/) | `oem-incentives-explorer` | Cash back, APR, and lease deals by ZIP |
+| [Incentive Deal Finder](packages/apps/incentive-deal-finder/) | `find-incentive-deals` | Search ALL OEM incentives by budget, not by brand |
 
 ### Dealer (5 apps)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Lot Pricing Dashboard | `scan-lot-pricing` | Full lot inventory with market price gaps, aging heatmap, stocking hot list |
-| Stocking Intelligence | `stocking-intelligence` | Demand heatmap, buy/avoid lists, VIN checker |
-| Pricing Transparency Report | `generate-pricing-report` | Shareable market report dealers give buyers |
-| Dealer Inventory Fit Scorer | `score-dealer-fit` | Which cars match your sales DNA? ML-scored acquisitions |
-| Dealer Conquest Analyzer | `analyze-dealer-conquest` | Find competitors' best-sellers you should stock |
+| [Lot Pricing Dashboard](packages/apps/lot-pricing-dashboard/) | `scan-lot-pricing` | Full lot inventory with market price gaps, aging heatmap, stocking hot list |
+| [Stocking Intelligence](packages/apps/stocking-intelligence/) | `stocking-intelligence` | Demand heatmap, buy/avoid lists, VIN checker |
+| [Pricing Transparency Report](packages/apps/pricing-transparency-report/) | `generate-pricing-report` | Shareable market report dealers give buyers |
+| [Dealer Inventory Fit Scorer](packages/apps/dealer-inventory-fit-scorer/) | `score-dealer-fit` | Which cars match your sales DNA? ML-scored acquisitions |
+| [Dealer Conquest Analyzer](packages/apps/dealer-conquest-analyzer/) | `analyze-dealer-conquest` | Find competitors' best-sellers you should stock |
 
 ### Appraiser (4 apps)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Appraiser Workbench | `appraiser-workbench` | Complete vehicle valuation studio |
-| Comparables Explorer | `comparables-explorer` | Price distribution and market positioning |
-| Depreciation Analyzer | `depreciation-analyzer` | Track how vehicles lose value over time |
-| Market Trends Dashboard | `market-trends-dashboard` | The pulse of the automotive market |
+| [Appraiser Workbench](packages/apps/appraiser-workbench/) | `appraiser-workbench` | Complete vehicle valuation studio |
+| [Comparables Explorer](packages/apps/comparables-explorer/) | `comparables-explorer` | Price distribution and market positioning |
+| [Depreciation Analyzer](packages/apps/depreciation-analyzer/) | `depreciation-analyzer` | Track how vehicles lose value over time |
+| [Market Trends Dashboard](packages/apps/market-trends-dashboard/) | `market-trends-dashboard` | The pulse of the automotive market |
 
 ### Dealership Group (3 apps)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Group Operations Center | `group-operations-center` | Every store, one screen |
-| Inventory Balancer | `inventory-balancer` | Move the right cars to the right stores |
-| Location Benchmarking | `location-benchmarking` | Rank and compare your locations |
+| [Group Operations Center](packages/apps/group-operations-center/) | `group-operations-center` | Every store, one screen |
+| [Inventory Balancer](packages/apps/inventory-balancer/) | `inventory-balancer` | Move the right cars to the right stores |
+| [Location Benchmarking](packages/apps/location-benchmarking/) | `location-benchmarking` | Rank and compare your locations |
 
 ### Lender (4 apps)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Underwriting Decision Support | `evaluate-loan-application` | Single-loan collateral valuation with LTV forecast |
-| Portfolio Risk Monitor | `portfolio-risk-monitor` | Track collateral health across your loan book |
-| Lender Portfolio Stress Test | `stress-test-portfolio` | What-if depreciation scenarios on your loan book |
-| EV Collateral Risk Monitor | `ev-collateral-risk` | EV vs ICE depreciation risk tracking |
+| [Underwriting Decision Support](packages/apps/underwriting-decision-support/) | `evaluate-loan-application` | Single-loan collateral valuation with LTV forecast |
+| [Portfolio Risk Monitor](packages/apps/portfolio-risk-monitor/) | `portfolio-risk-monitor` | Track collateral health across your loan book |
+| [Lender Portfolio Stress Test](packages/apps/lender-portfolio-stress-test/) | `stress-test-portfolio` | What-if depreciation scenarios on your loan book |
+| [EV Collateral Risk Monitor](packages/apps/ev-collateral-risk/) | `ev-collateral-risk` | EV vs ICE depreciation risk tracking |
 
 ### Analyst (3 apps)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Earnings Signal Dashboard | `earnings-signal-dashboard` | Pre-earnings channel check for auto tickers |
-| Watchlist Monitor | `watchlist-monitor` | Morning signal scan across your portfolio |
-| Dealer Group Scorecard | `dealer-group-scorecard` | Benchmark public dealer groups |
+| [Earnings Signal Dashboard](packages/apps/earnings-signal-dashboard/) | `earnings-signal-dashboard` | Pre-earnings channel check for auto tickers |
+| [Watchlist Monitor](packages/apps/watchlist-monitor/) | `watchlist-monitor` | Morning signal scan across your portfolio |
+| [Dealer Group Scorecard](packages/apps/dealer-group-scorecard/) | `dealer-group-scorecard` | Benchmark public dealer groups |
 
 ### Insurer (2 apps)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Claims Valuation Workbench | `claims-valuation` | Total-loss determination with market evidence |
-| Insurance Premium Benchmarker | `benchmark-insurance-premiums` | Segment-level replacement cost and risk analysis |
+| [Claims Valuation Workbench](packages/apps/claims-valuation-workbench/) | `claims-valuation` | Total-loss determination with market evidence |
+| [Insurance Premium Benchmarker](packages/apps/insurance-premium-benchmarker/) | `benchmark-insurance-premiums` | Segment-level replacement cost and risk analysis |
 
 ### Manufacturer (2 apps)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Brand Command Center | `brand-command-center` | Your brands vs the competition |
-| Regional Demand Allocator | `regional-demand-allocator` | Allocate inventory where demand is hottest |
+| [Brand Command Center](packages/apps/brand-command-center/) | `brand-command-center` | Your brands vs the competition |
+| [Regional Demand Allocator](packages/apps/regional-demand-allocator/) | `regional-demand-allocator` | Allocate inventory where demand is hottest |
 
 ### Auction House (2 apps)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Auction Lane Planner | `auction-lane-planner` | Plan lanes, price consignments, target buyers |
-| Auction Arbitrage Finder | `find-auction-arbitrage` | Wholesale vs retail spread — find profit opportunities |
+| [Auction Lane Planner](packages/apps/auction-lane-planner/) | `auction-lane-planner` | Plan lanes, price consignments, target buyers |
+| [Auction Arbitrage Finder](packages/apps/auction-arbitrage-finder/) | `find-auction-arbitrage` | Wholesale vs retail spread — find profit opportunities |
 
 ### Wholesaler (1 app)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Wholesale Vehicle Router | `route-wholesale-vehicles` | Paste VINs, get dealer-match rankings |
+| [Wholesale Vehicle Router](packages/apps/wholesale-vehicle-router/) | `route-wholesale-vehicles` | Paste VINs, get dealer-match rankings |
 
 ### Cross-Segment (4 apps)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| EV Market Monitor | `ev-market-monitor` | The EV transition in one dashboard |
-| VIN History Detective | `trace-vin-history` | Full listing timeline — dealer hops, price changes, red flags |
-| Market Anomaly Detector | `detect-market-anomalies` | Find underpriced vehicles and pricing outliers |
-| UK Market Trends | `get-uk-market-trends` | Macro UK automotive market intelligence |
+| [EV Market Monitor](packages/apps/ev-market-monitor/) | `ev-market-monitor` | The EV transition in one dashboard |
+| [VIN History Detective](packages/apps/vin-history-detective/) | `trace-vin-history` | Full listing timeline — dealer hops, price changes, red flags |
+| [Market Anomaly Detector](packages/apps/market-anomaly-detector/) | `detect-market-anomalies` | Find underpriced vehicles and pricing outliers |
+| [UK Market Trends](packages/apps/uk-market-trends/) | `get-uk-market-trends` | Macro UK automotive market intelligence |
 
 ### Consumer UK (1 app)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| UK Market Explorer | `search-uk-cars` | Search and compare UK car listings in GBP |
+| [UK Market Explorer](packages/apps/uk-market-explorer/) | `search-uk-cars` | Search and compare UK car listings in GBP |
 
 ### Dealer UK (1 app)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| UK Dealer Pricing | `scan-uk-lot-pricing` | UK lot inventory priced against the market |
+| [UK Dealer Pricing](packages/apps/uk-dealer-pricing/) | `scan-uk-lot-pricing` | UK lot inventory priced against the market |
 
 ### Auto Media (1 app)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Auto Journalist Briefing | `generate-market-briefing` | One-page market briefing with quotable data points |
+| [Auto Journalist Briefing](packages/apps/auto-journalist-briefing/) | `generate-market-briefing` | One-page market briefing with quotable data points |
 
 ### Fleet Manager (1 app)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Fleet Lifecycle Manager | `manage-fleet-lifecycle` | Fleet values, depreciation, and replacement planning |
+| [Fleet Lifecycle Manager](packages/apps/fleet-lifecycle-manager/) | `manage-fleet-lifecycle` | Fleet values, depreciation, and replacement planning |
 
 ### Rental/Subscription (1 app)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Rental Fleet Valuator | `value-rental-fleet` | Mileage-adjusted fleet valuation with rotation timing |
+| [Rental Fleet Valuator](packages/apps/rental-fleet-valuator/) | `value-rental-fleet` | Mileage-adjusted fleet valuation with rotation timing |
 
 ### Lender Sales (1 app)
 
 | App | Tool Name | Description |
 |-----|-----------|-------------|
-| Territory Pipeline | `territory-pipeline` | Find dealers who need floor plan |
+| [Territory Pipeline](packages/apps/territory-pipeline/) | `territory-pipeline` | Find dealers who need floor plan |
 
 ### Chat Demos (7 apps)
 
@@ -288,13 +288,13 @@ Each chat demo uses a different SDK to showcase MarketCheck API capabilities thr
 
 | App | SDK | Language | Description |
 |-----|-----|----------|-------------|
-| AI Car Advisor | [Vercel AI SDK](https://ai-sdk.dev/) | TypeScript/Next.js | Reference chat with `useChat` hook, streaming, and tool visualization |
-| Dashboard Copilot | [CopilotKit](https://copilotkit.ai/) | React/Next.js | AI copilot overlay on existing dashboard UI |
-| MarketCheck Chat | [assistant-ui](https://assistant-ui.com/) | React/Next.js | Custom-branded noir theme with rich tool result cards |
-| Multi-Platform Bot | [Chat SDK](https://chat-sdk.dev/) | TypeScript | Single codebase deploys to Slack, Discord, Telegram, Teams |
-| Market Analyst | [Chainlit](https://chainlit.io/) | Python | MCP-native chat with built-in tool execution visualization |
-| Quick Market Check | [Streamlit](https://streamlit.io/) | Python | Lightweight chat for data teams |
-| AI Agent Explorer | [LangChain](https://langchain.com/) | TypeScript/Next.js | LangGraph ReAct agent with visible reasoning chains |
+| [AI Car Advisor](packages/apps/chat-vercel-ai/) | [Vercel AI SDK](https://ai-sdk.dev/) | TypeScript/Next.js | Reference chat with `useChat` hook, streaming, and tool visualization |
+| [Dashboard Copilot](packages/apps/chat-copilotkit/) | [CopilotKit](https://copilotkit.ai/) | React/Next.js | AI copilot overlay on existing dashboard UI |
+| [MarketCheck Chat](packages/apps/chat-assistant-ui/) | [assistant-ui](https://assistant-ui.com/) | React/Next.js | Custom-branded noir theme with rich tool result cards |
+| [Multi-Platform Bot](packages/apps/chat-sdk-bot/) | [Chat SDK](https://chat-sdk.dev/) | TypeScript | Single codebase deploys to Slack, Discord, Telegram, Teams |
+| [Market Analyst](packages/apps/chat-chainlit/) | [Chainlit](https://chainlit.io/) | Python | MCP-native chat with built-in tool execution visualization |
+| [Quick Market Check](packages/apps/chat-streamlit/) | [Streamlit](https://streamlit.io/) | Python | Lightweight chat for data teams |
+| [AI Agent Explorer](packages/apps/chat-langchain/) | [LangChain](https://langchain.com/) | TypeScript/Next.js | LangGraph ReAct agent with visible reasoning chains |
 
 #### Running Chat Demos
 
