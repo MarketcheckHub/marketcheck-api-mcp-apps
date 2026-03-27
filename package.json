@@ -19,7 +19,7 @@
     "build:apps": "node scripts/build-apps.mjs",
     "build:gallery": "cd packages/gallery && npx vite build",
     "build:server": "cd packages/server && npm run build",
-    "build": "npm run build:shared && npm run build:apps && npm run build:gallery && node scripts/prepare-vercel.mjs",
+    "build": "npm run build:shared && npm run build:apps && npm run build:gallery && node scripts/prepare-vercel.mjs && node scripts/generate-pages.mjs",
     "build:full": "npm run build && npm run build:server",
     "serve": "npm run serve --workspace=@mcp-apps/server",
     "dev": "npm run build && npm run serve"

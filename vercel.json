@@ -8,8 +8,22 @@
     }
   },
   "rewrites": [
+    { "source": "/mcp", "destination": "/api/index.ts" },
     { "source": "/api/:path*", "destination": "/api/index.ts" },
     { "source": "/apps/:path*", "destination": "/apps/:path*" },
+    { "source": "/app/:id", "destination": "/app/:id/index.html" },
+    { "source": "/app/:id/", "destination": "/app/:id/index.html" },
+    { "source": "/docs/:path*", "destination": "/docs/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/mcp",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET, POST, DELETE, OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "*" }
+      ]
+    }
   ]
 }
