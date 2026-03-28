@@ -426,10 +426,14 @@ ${navHTML("apis")}
     <h2>Overview</h2>
     <p>These derivative APIs are hosted at <code>${SITE_URL}/api/proxy/{endpoint}</code> and wrap the underlying <a href="https://apidocs.marketcheck.com" target="_blank">MarketCheck APIs</a> into higher-level, use-case-specific endpoints. Each endpoint orchestrates multiple API calls (VIN decode, price prediction, search, history, etc.) and returns a unified response.</p>
 
-    <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:16px 20px;margin:20px 0;">
-      <div style="font-weight:700;color:#92400e;margin-bottom:6px;">&#9888; Reference Only \u2014 Not Under LTS</div>
-      <p style="color:#78350f;font-size:14px;margin:0;">These derivative APIs are provided <strong>as reference implementations</strong>, just like the apps themselves. They use the underlying standard MarketCheck APIs under the hood but are <strong>not under Long-Term Support (LTS)</strong> like the <a href="https://apidocs.marketcheck.com" target="_blank" style="color:#92400e;font-weight:600;">standard MarketCheck APIs</a>.</p>
-      <p style="color:#78350f;font-size:14px;margin:8px 0 0;"><strong>Recommended approach:</strong> Use these endpoints for development and prototyping only. For production use, either build your own variants using the <a href="https://apidocs.marketcheck.com" target="_blank" style="color:#92400e;font-weight:600;">core MarketCheck APIs</a> directly, or contact <a href="mailto:support@marketcheck.com" style="color:#92400e;font-weight:600;">MarketCheck's support team</a> if you need LTS on any of these endpoints and want them elevated to the standard MarketCheck API platform.</p>
+    <div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:20px 24px;margin:20px 0;">
+      <div style="font-weight:700;color:#92400e;margin-bottom:8px;font-size:15px;">Important: Reference Implementation \u2014 Not Under Long-Term Support</div>
+      <p style="color:#78350f;font-size:14px;margin:0;line-height:1.7;">These derivative endpoints are provided as <strong>reference implementations</strong> to demonstrate how multiple <a href="https://apidocs.marketcheck.com" target="_blank" style="color:#92400e;font-weight:600;">MarketCheck API</a> calls can be composed into higher-level, use-case-specific workflows. They are not covered under the same Long-Term Support (LTS) commitments as the <a href="https://apidocs.marketcheck.com" target="_blank" style="color:#92400e;font-weight:600;">standard MarketCheck API platform</a> and may change without notice.</p>
+      <p style="color:#78350f;font-size:14px;margin:12px 0 0;line-height:1.7;"><strong>For production systems,</strong> we recommend one of the following approaches:</p>
+      <ul style="color:#78350f;font-size:14px;margin:8px 0 0 20px;line-height:1.8;">
+        <li><strong>Build your own orchestration layer</strong> using the <a href="https://apidocs.marketcheck.com" target="_blank" style="color:#92400e;font-weight:600;">core MarketCheck APIs</a> directly. These endpoints serve as working examples of how to structure those calls.</li>
+        <li><strong>Request LTS elevation</strong> \u2014 if a specific derivative endpoint meets a critical need, contact <a href="mailto:support@marketcheck.com" style="color:#92400e;font-weight:600;">MarketCheck support</a> to discuss promoting it to the standard API platform with full versioning, SLA, and backward-compatibility guarantees.</li>
+      </ul>
     </div>
 
     <p><strong>Authentication:</strong> All endpoints require a MarketCheck API key passed in the request body as <code>_auth_mode</code> and <code>_auth_value</code>.</p>
