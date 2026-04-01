@@ -1283,14 +1283,25 @@ async function render() {
   // Chart mode toggle
   const modeGroup = document.createElement("div");
   modeGroup.style.cssText = "display:flex;border-radius:6px;overflow:hidden;";
+  function updateModeStyles() {
+    const isAbs = state.chartMode === "absolute";
+    absBtn.style.border = `1px solid ${isAbs ? "#3b82f6" : "#334155"}`;
+    absBtn.style.background = isAbs ? "#3b82f6" : "#1e293b";
+    absBtn.style.color = isAbs ? "#fff" : "#94a3b8";
+    idxBtn.style.border = `1px solid ${!isAbs ? "#3b82f6" : "#334155"}`;
+    idxBtn.style.background = !isAbs ? "#3b82f6" : "#1e293b";
+    idxBtn.style.color = !isAbs ? "#fff" : "#94a3b8";
+  }
   const absBtn = createToggleButton("Absolute $", state.chartMode === "absolute", () => {
     state.chartMode = "absolute";
+    updateModeStyles();
     renderChart(data);
   });
   absBtn.style.cssText += "font-size:11px;padding:4px 10px;";
   absBtn.style.borderRadius = "6px 0 0 6px";
   const idxBtn = createToggleButton("Indexed (100)", state.chartMode === "indexed", () => {
     state.chartMode = "indexed";
+    updateModeStyles();
     renderChart(data);
   });
   idxBtn.style.cssText += "font-size:11px;padding:4px 10px;";
