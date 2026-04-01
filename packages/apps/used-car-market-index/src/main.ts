@@ -1325,6 +1325,15 @@ async function render() {
     { key: "losers", label: "Top Losers" },
     { key: "active", label: "Most Active" },
   ];
+  function updateTabStyles() {
+    const tabs = moversHeader.querySelectorAll("button");
+    tabs.forEach((btn, i) => {
+      const key = moversTabDefs[i].key;
+      const active = state.moversTab === key;
+      btn.style.borderBottom = `2px solid ${active ? "#3b82f6" : "transparent"}`;
+      btn.style.color = active ? "#f8fafc" : "#64748b";
+    });
+  }
   for (const tab of moversTabDefs) {
     const tabBtn = document.createElement("button");
     tabBtn.textContent = tab.label;
@@ -1332,6 +1341,7 @@ async function render() {
     tabBtn.style.cssText = `flex:1;padding:10px 8px;font-size:11px;font-weight:700;cursor:pointer;border:none;border-bottom:2px solid ${isActive ? "#3b82f6" : "transparent"};background:transparent;color:${isActive ? "#f8fafc" : "#64748b"};text-transform:uppercase;letter-spacing:0.5px;transition:all 0.15s;`;
     tabBtn.addEventListener("click", () => {
       state.moversTab = tab.key;
+      updateTabStyles();
       renderMovers(data);
     });
     moversHeader.appendChild(tabBtn);
