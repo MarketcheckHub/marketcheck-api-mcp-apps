@@ -68,7 +68,48 @@ async function handleSoldSummary(auth: { mode: string; value: string }, args: an
 }
 
 async function handleIncentives(auth: { mode: string; value: string }, args: any) {
-  return mcFetch("/incentives/by-zip", auth.mode, auth.value, args);
+  // Map legacy 'oem' param to 'make' for the correct endpoint
+  const params = { ...args };
+  if (params.oem && !params.make) { params.make = params.oem; delete params.oem; }
+  // Incentive data is at MSA/state level — ZIP yields 0 results, so omit it
+  delete params.zip;
+  if (!params.rows) params.rows = 50;
+  return mcFetch("/search/car/incentive/oem", auth.mode, auth.value, params);
+}
+
+/** Transform OEM incentive API listings into the app-friendly format */
+function transformIncentiveListings(apiResponse: any): any[] {
+  const listings = apiResponse?.listings || [];
+  return listings.map((listing: any) => {
+    const o = listing.offer || {};
+    const v = (o.vehicles || [])[0] || {};
+    const amt = (o.amounts || [])[0] || {};
+    const offerType = o.offer_type === "cash" ? "cashback" : o.offer_type === "finance" ? "apr" : o.offer_type === "lease" ? "lease" : o.offer_type || "cashback";
+    const amount = offerType === "cashback" ? (o.cashback_amount || 0) : offerType === "apr" ? (amt.apr || 0) : (amt.monthly || 0);
+    const amountDisplay = offerType === "cashback" ? `$${amount.toLocaleString()} Cash Back`
+      : offerType === "apr" ? `${amount}% APR / ${amt.term || 0}mo`
+      : `$${amount}/mo / ${amt.term || 0}mo`;
+    return {
+      id: listing.id || "",
+      make: v.make || "",
+      model: v.model || "",
+      type: offerType,
+      offerType,
+      title: (o.titles?.[0] || o.oem_program_name || `${v.make} ${o.offer_type || "offer"}`),
+      description: (o.offers?.[0] || "").substring(0, 300),
+      amount,
+      amountDisplay,
+      term: amt.term || 0,
+      eligibleModels: o.vehicles?.map((ve: any) => ve.model).filter(Boolean) || [],
+      expirationDate: o.valid_through || "",
+      dueAtSigning: o.due_at_signing,
+      msrp: o.msrp,
+      stackable: false,
+      finePrint: (o.disclaimers?.[0] || "").substring(0, 300),
+      region: listing.state || listing.city || "National",
+      raw: listing,
+    };
+  });
 }
 
 // ── Composite Tool Handlers (orchestrate multiple API calls) ────────────
@@ -107,7 +148,7 @@ const compositeHandlers: Record<string, (auth: { mode: string; value: string }, 
   "search-cars": async (auth, args) => {
     return handleSearchActive(auth, {
       ...args, stats: "price,miles", facets: "make,model,trim,body_type",
-      include_dealer_object: true,
+      include_dealer_object: true, include_build_object: true, fetch_all_photos: true,
     });
   },
 
@@ -188,17 +229,255 @@ const compositeHandlers: Record<string, (auth: { mode: string; value: string }, 
   },
 
   "oem-incentives-explorer": async (auth, args) => {
-    const incentives = await handleIncentives(auth, { oem: args.make, zip: args.zip, model: args.model });
+    const raw = await handleIncentives(auth, { oem: args.make, zip: args.zip, model: args.model, rows: 50 });
+    const incentives = transformIncentiveListings(raw);
     let compareIncentives: any[] = [];
     if (args.compareMakes?.length) {
       compareIncentives = await Promise.all(
         args.compareMakes.map(async (make: string) => {
-          const data = await handleIncentives(auth, { oem: make, zip: args.zip });
-          return { make, data };
+          const rawC = await handleIncentives(auth, { oem: make, zip: args.zip, rows: 50 });
+          return { make, incentives: transformIncentiveListings(rawC) };
         })
       );
     }
-    return { make: args.make, incentives, compareIncentives };
+    // Return in the format the app expects: {results: [{make, incentives}], zip}
+    const results = [{ make: args.make, incentives }];
+    for (const ci of compareIncentives) {
+      results.push({ make: ci.make, incentives: ci.incentives });
+    }
+    return { results, zip: args.zip || "" };
+  },
+
+  // ── New App Composite Handlers ─────────────────────────────────────────
+
+  "generate-vin-market-report": async (auth, args) => {
+    const decode = await handleDecodeVin(auth, args);
+    const [retail, wholesale, history] = await Promise.all([
+      handlePredictPrice(auth, { ...args, dealer_type: "franchise" }).catch(() => ({})),
+      handlePredictPrice(auth, { ...args, dealer_type: "independent" }).catch(() => ({})),
+      handleCarHistory(auth, args).catch(() => ({ listings: [] })),
+    ]);
+    const make = decode?.make; const model = decode?.model;
+    const yearRange = decode?.year ? `${decode.year - 1}-${decode.year + 1}` : undefined;
+    const [activeComps, soldComps, soldSummary] = await Promise.all([
+      handleSearchActive(auth, { make, model, year: yearRange, zip: args.zip, radius: 100, stats: "price,miles,dom", rows: 10 }),
+      handleSearchPast90(auth, { make, model, year: yearRange, zip: args.zip, radius: 100, stats: "price", rows: 10 }).catch(() => ({ listings: [], num_found: 0 })),
+      handleSoldSummary(auth, { make, model, ranking_dimensions: "make,model", ranking_measure: "sold_count,average_sale_price" }).catch(() => ({})),
+    ]);
+    let incentives = null;
+    if (decode?.year && decode.year >= new Date().getFullYear() - 1) {
+      try { incentives = await handleIncentives(auth, { oem: make, zip: args.zip }); } catch {}
+    }
+    return { decode, retail, wholesale, history, activeComps, soldComps, soldSummary, incentives };
+  },
+
+  "trace-vin-history": async (auth, args) => {
+    const decode = await handleDecodeVin(auth, args);
+    const [history, prediction] = await Promise.all([
+      handleCarHistory(auth, { vin: args.vin, sort_order: "asc" }),
+      handlePredictPrice(auth, { vin: args.vin, miles: args.miles, dealer_type: "franchise", zip: args.zip }),
+    ]);
+    return { decode, history, prediction };
+  },
+
+  "generate-pricing-report": async (auth, args) => {
+    const decode = await handleDecodeVin(auth, args);
+    const [prediction, activeComps, soldComps] = await Promise.all([
+      handlePredictPrice(auth, { ...args, dealer_type: "franchise" }),
+      handleSearchActive(auth, { make: decode?.make, model: decode?.model, zip: args.zip, radius: 75, stats: "price,miles,dom", rows: 10 }),
+      handleSearchPast90(auth, { make: decode?.make, model: decode?.model, zip: args.zip, radius: 100, stats: "price", rows: 10 }),
+    ]);
+    return { decode, prediction, activeComps, soldComps };
+  },
+
+  "find-incentive-deals": async (auth, args) => {
+    const makes = (args.makes ?? "Toyota,Honda,Ford,Chevrolet,Hyundai,Kia,Nissan,BMW,Mercedes-Benz,Volkswagen").split(",");
+    const allOffers: any[] = [];
+    await Promise.all(
+      makes.map(async (make: string) => {
+        try {
+          const raw = await handleIncentives(auth, { oem: make.trim(), zip: args.zip, rows: 50 });
+          const offers = transformIncentiveListings(raw);
+          allOffers.push(...offers);
+        } catch {}
+      })
+    );
+    return { offers: allOffers };
+  },
+
+  "route-wholesale-vehicles": async (auth, args) => {
+    const vins = (args.vins ?? "").split(",").map((v: string) => v.trim()).filter(Boolean);
+    const results = await Promise.all(
+      vins.map(async (vin: string) => {
+        const [decode, prediction] = await Promise.all([
+          handleDecodeVin(auth, { vin }),
+          handlePredictPrice(auth, { vin, dealer_type: "franchise", zip: args.zip }),
+        ]);
+        return { vin, decode, prediction };
+      })
+    );
+    return { results };
+  },
+
+  "score-dealer-fit": async (auth, args) => {
+    const vins = (args.vins ?? "").split(",").map((v: string) => v.trim()).filter(Boolean);
+    const results = await Promise.all(
+      vins.map(async (vin: string) => {
+        const [decode, prediction] = await Promise.all([
+          handleDecodeVin(auth, { vin }),
+          handlePredictPrice(auth, { vin, dealer_type: "franchise", zip: args.zip }),
+        ]);
+        return { vin, decode, prediction };
+      })
+    );
+    return { dealerId: args.dealer_id, results };
+  },
+
+  "search-uk-cars": async (auth, args) => {
+    const active = await mcFetch("/search/car/uk/active", auth.mode, auth.value, {
+      make: args.make, model: args.model, year: args.year,
+      postal_code: args.postal_code, radius: args.radius,
+      price_range: args.price_range, miles_range: args.miles_range,
+      rows: args.rows ?? 25, stats: "price,miles", start: args.start,
+    });
+    let recent = null;
+    try { recent = await mcFetch("/search/car/uk/recents", auth.mode, auth.value, { make: args.make, model: args.model, rows: 10, stats: "price" }); } catch {}
+    return { active, recent };
+  },
+
+  "get-uk-market-trends": async (auth, args) => {
+    const active = await mcFetch("/search/car/uk/active", auth.mode, auth.value, {
+      rows: 0, stats: "price,miles",
+      ...(args.make ? { make: args.make } : {}),
+    });
+    const recent = await mcFetch("/search/car/uk/recents", auth.mode, auth.value, {
+      rows: 0, stats: "price,miles",
+      ...(args.make ? { make: args.make } : {}),
+    });
+    return { active, recent };
+  },
+
+  "evaluate-loan-application": async (auth, args) => {
+    const decode = await handleDecodeVin(auth, args);
+    const [retail, wholesale, history, soldComps] = await Promise.all([
+      handlePredictPrice(auth, { ...args, dealer_type: "franchise" }),
+      handlePredictPrice(auth, { ...args, dealer_type: "independent" }),
+      handleCarHistory(auth, { vin: args.vin, sort_order: "asc" }),
+      handleSearchPast90(auth, { make: decode?.make, model: decode?.model, zip: args.zip, radius: 100, rows: 8, stats: "price" }),
+    ]);
+    return { decode, retail, wholesale, history, soldComps };
+  },
+
+  "benchmark-insurance-premiums": async (auth, args) => {
+    const [byBodyType, byFuelType, byState] = await Promise.all([
+      handleSoldSummary(auth, { ranking_dimensions: "body_type", ranking_measure: "sold_count,average_sale_price", inventory_type: "Used" }),
+      handleSoldSummary(auth, { ranking_dimensions: "body_type,fuel_type_category", ranking_measure: "sold_count,average_sale_price", inventory_type: "Used" }),
+      handleSoldSummary(auth, { ranking_dimensions: "state", ranking_measure: "sold_count,average_sale_price", inventory_type: "Used", top_n: 15 }),
+    ]);
+    return { byBodyType, byFuelType, byState };
+  },
+
+  "evaluate-incentive-deal": async (auth, args) => {
+    const decode = await handleDecodeVin(auth, args);
+    const [prediction, rawIncentives, activeComps] = await Promise.all([
+      handlePredictPrice(auth, { ...args, dealer_type: "franchise" }),
+      handleIncentives(auth, { oem: decode?.make, zip: args.zip, model: decode?.model, rows: 50 }),
+      handleSearchActive(auth, { make: decode?.make, model: decode?.model, zip: args.zip, radius: 75, rows: 5, stats: "price" }),
+    ]);
+    const incentives = transformIncentiveListings(rawIncentives);
+    return { decode, prediction, incentives, activeComps };
+  },
+
+  "generate-market-briefing": async (auth, args) => {
+    const [byMake, byBodyType, byState] = await Promise.all([
+      handleSoldSummary(auth, { ranking_dimensions: "make", ranking_measure: "sold_count,average_sale_price", ranking_order: "desc", top_n: 15, inventory_type: "Used" }),
+      handleSoldSummary(auth, { ranking_dimensions: "body_type", ranking_measure: "sold_count,average_sale_price", inventory_type: "Used" }),
+      handleSoldSummary(auth, { ranking_dimensions: "state", ranking_measure: "average_sale_price", ranking_order: "desc", top_n: 10, inventory_type: "Used" }),
+    ]);
+    return { byMake, byBodyType, byState };
+  },
+
+  "find-auction-arbitrage": async (auth, args) => {
+    const vins = (args.vins ?? "").split(",").map((v: string) => v.trim()).filter(Boolean);
+    const results = await Promise.all(
+      vins.map(async (vin: string) => {
+        const [decode, retail, wholesale] = await Promise.all([
+          handleDecodeVin(auth, { vin }),
+          handlePredictPrice(auth, { vin, dealer_type: "franchise", zip: args.zip }),
+          handlePredictPrice(auth, { vin, dealer_type: "independent", zip: args.zip }),
+        ]);
+        return { vin, decode, retail, wholesale };
+      })
+    );
+    return { results };
+  },
+
+  "scan-uk-lot-pricing": async (auth, args) => {
+    const inventory = await mcFetch("/search/car/uk/active", auth.mode, auth.value, {
+      dealer_id: args.dealer_id, rows: 30, stats: "price,miles",
+    });
+    const recent = await mcFetch("/search/car/uk/recents", auth.mode, auth.value, {
+      make: args.make, rows: 10, stats: "price",
+    });
+    return { inventory, recent };
+  },
+
+  "analyze-dealer-conquest": async (auth, args) => {
+    const myInventory = await handleSearchActive(auth, { dealer_id: args.dealer_id, rows: 50, facets: "make,model,body_type" });
+    const marketInventory = await handleSearchActive(auth, { zip: args.zip, radius: args.radius ?? 50, rows: 0, facets: "make,model,body_type" });
+    const demand = await handleSoldSummary(auth, { state: args.state, ranking_dimensions: "make,model", ranking_measure: "sold_count", ranking_order: "desc", top_n: 20 });
+    return { myInventory, marketInventory, demand };
+  },
+
+  "detect-market-anomalies": async (auth, args) => {
+    const results = await handleSearchActive(auth, {
+      make: args.make, model: args.model, year: args.year, state: args.state,
+      rows: 50, stats: "price,miles,dom", sort_by: "price", sort_order: "asc",
+    });
+    return { results };
+  },
+
+  "stress-test-portfolio": async (auth, args) => {
+    const vins = (args.vins ?? "").split(",").map((v: string) => v.trim()).filter(Boolean);
+    const results = await Promise.all(
+      vins.map(async (vin: string) => {
+        const [decode, prediction] = await Promise.all([
+          handleDecodeVin(auth, { vin }),
+          handlePredictPrice(auth, { vin, dealer_type: "franchise", zip: args.zip }),
+        ]);
+        return { vin, decode, prediction };
+      })
+    );
+    return { results };
+  },
+
+  "value-rental-fleet": async (auth, args) => {
+    const vins = (args.vins ?? "").split(",").map((v: string) => v.trim()).filter(Boolean);
+    const results = await Promise.all(
+      vins.map(async (vin: string) => {
+        const [decode, prediction] = await Promise.all([
+          handleDecodeVin(auth, { vin }),
+          handlePredictPrice(auth, { vin, dealer_type: "franchise", zip: args.zip }),
+        ]);
+        return { vin, decode, prediction };
+      })
+    );
+    return { results };
+  },
+
+  "manage-fleet-lifecycle": async (auth, args) => {
+    const vins = (args.vins ?? "").split(",").map((v: string) => v.trim()).filter(Boolean);
+    const results = await Promise.all(
+      vins.map(async (vin: string) => {
+        const [decode, prediction] = await Promise.all([
+          handleDecodeVin(auth, { vin }),
+          handlePredictPrice(auth, { vin, dealer_type: "franchise", zip: args.zip }),
+        ]);
+        return { vin, decode, prediction };
+      })
+    );
+    const replacements = await handleSearchActive(auth, { zip: args.zip, radius: 50, rows: 10, sort_by: "price", sort_order: "asc" });
+    return { results, replacements };
   },
 };
 
@@ -209,6 +488,7 @@ const passthroughTools = [
   "portfolio-risk-monitor", "ev-collateral-risk", "brand-command-center",
   "regional-demand-allocator", "ev-market-monitor", "auction-lane-planner",
   "territory-pipeline", "depreciation-analyzer", "market-trends-dashboard",
+  // New tools covered by compositeHandlers above (listed for reference only)
 ];
 
 // ── Register Routes ─────────────────────────────────────────────────────
