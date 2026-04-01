@@ -190,14 +190,16 @@ const compositeHandlers: Record<string, (auth: { mode: string; value: string }, 
   },
 
   "get-market-index": async (auth, args) => {
-    const summary = await handleSoldSummary(auth, {
-      ranking_dimensions: "make", ranking_measure: "sold_count,average_sale_price",
-      inventory_type: "Used", top_n: 25, ...(args.state ? { state: args.state } : {}),
-    });
-    const segments = await handleSoldSummary(auth, {
-      ranking_dimensions: "body_type", ranking_measure: "sold_count,average_sale_price",
-      inventory_type: "Used", ...(args.state ? { state: args.state } : {}),
-    });
+    const [summary, segments] = await Promise.all([
+      handleSoldSummary(auth, {
+        ranking_dimensions: "make", ranking_measure: "sold_count",
+        inventory_type: "Used", top_n: 25, ...(args.state ? { state: args.state } : {}),
+      }),
+      handleSoldSummary(auth, {
+        ranking_dimensions: "body_type", ranking_measure: "sold_count",
+        inventory_type: "Used", ...(args.state ? { state: args.state } : {}),
+      }),
+    ]);
     return { summary, segments };
   },
 

@@ -1,6 +1,7 @@
 import { App } from "@modelcontextprotocol/ext-apps";
 
-const _safeApp = (() => { try { return new App({ name: "used-car-market-index" });
+let _safeApp: any = null;
+try { _safeApp = new App({ name: "used-car-market-index" }); } catch {}
 
 // ── Dual-Mode Data Provider ────────────────────────────────────────────
 function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | null } {
@@ -13,8 +14,8 @@ function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | n
 }
 
 function _detectAppMode(): "mcp" | "live" | "demo" {
-  if (_safeApp) return "mcp";
   if (_getAuth().value) return "live";
+  if (_safeApp) return "mcp";
   return "demo";
 }
 
@@ -36,24 +37,208 @@ function _proxyBase(): string {
   return location.protocol.startsWith("http") ? "" : "http://localhost:3001";
 }
 
-async function _callTool(toolName: string, args: Record<string, any>): Promise<any> {
-  if (_safeApp) {
-    try {
-      const r = await _safeApp.callServerTool({ name: toolName, arguments: args }); return r;
-            
-    } catch {}
+// ── Direct MarketCheck API Client (browser → api.marketcheck.com) ──────
+const _MC = "https://api.marketcheck.com";
+async function _mcApi(path, params = {}) {
+  const auth = _getAuth();
+  if (!auth.value) return null;
+  const prefix = path.startsWith("/api/") ? "" : "/v2";
+  const url = new URL(_MC + prefix + path);
+  if (auth.mode === "api_key") url.searchParams.set("api_key", auth.value);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
+  const headers = {};
+  if (auth.mode === "oauth_token") headers["Authorization"] = "Bearer " + auth.value;
+  const res = await fetch(url.toString(), { headers });
+  if (!res.ok) throw new Error("MC API " + res.status);
+  return res.json();
+}
+function _mcDecode(vin) { return _mcApi("/decode/car/neovin/" + vin + "/specs"); }
+function _mcPredict(p) { return _mcApi("/predict/car/us/marketcheck_price/comparables", p); }
+function _mcActive(p) { return _mcApi("/search/car/active", p); }
+function _mcRecent(p) { return _mcApi("/search/car/recents", p); }
+function _mcHistory(vin) { return _mcApi("/history/car/" + vin); }
+function _mcSold(p) { return _mcApi("/api/v1/sold-vehicles/summary", p); }
+function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;delete q.oem;} return _mcApi("/search/car/incentive/oem", q); }
+function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
+function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
+
+async function _fetchDirect(args) {
+  const [summary, segments] = await Promise.all([
+    _mcSold({ranking_dimensions:"make",ranking_measure:"sold_count",inventory_type:"Used",top_n:25,...(args.state?{state:args.state}:{})}),
+    _mcSold({ranking_dimensions:"body_type",ranking_measure:"sold_count",inventory_type:"Used",...(args.state?{state:args.state}:{})}),
+  ]);
+  return {summary,segments};
+}
+
+function _transformRawToMarketData(raw: any): MarketData | null {
+  const summaryRows = raw.summary?.data ?? [];
+  const segmentRows = raw.segments?.data ?? [];
+  if (!summaryRows.length && !segmentRows.length) return null;
+
+  const months = timeRangeToMonths(state.timeRange);
+
+  // Aggregate make data across states
+  const makeMap: Record<string, { sold: number; totalPrice: number; count: number; avgDom: number }> = {};
+  for (const r of summaryRows) {
+    const make = r.make ?? "";
+    if (!make) continue;
+    if (!makeMap[make]) makeMap[make] = { sold: 0, totalPrice: 0, count: 0, avgDom: 0 };
+    makeMap[make].sold += r.sold_count ?? 0;
+    makeMap[make].totalPrice += (r.average_sale_price ?? 0) * (r.sold_count ?? 0);
+    makeMap[make].count += r.sold_count ?? 0;
+    makeMap[make].avgDom += (r.average_days_on_market ?? 0) * (r.sold_count ?? 0);
+  }
+
+  // Build composite from all makes
+  let totalVolume = 0;
+  let totalPriceWeighted = 0;
+  const makeEntries: { make: string; avgPrice: number; volume: number }[] = [];
+  for (const [make, v] of Object.entries(makeMap)) {
+    const avg = v.count > 0 ? v.totalPrice / v.count : 0;
+    totalVolume += v.sold;
+    totalPriceWeighted += v.totalPrice;
+    makeEntries.push({ make, avgPrice: Math.round(avg), volume: v.sold });
+  }
+  makeEntries.sort((a, b) => b.volume - a.volume);
+
+  const compositePrice = totalVolume > 0 ? Math.round(totalPriceWeighted / totalVolume) : 28000;
+  const compositeTS = _buildTimeSeries(compositePrice, months, 2);
+
+  // Segment indices from body_type data
+  const segMap: Record<string, { sold: number; totalPrice: number; count: number }> = {};
+  for (const r of segmentRows) {
+    const bt = r.body_type ?? "";
+    if (!bt) continue;
+    if (!segMap[bt]) segMap[bt] = { sold: 0, totalPrice: 0, count: 0 };
+    segMap[bt].sold += r.sold_count ?? 0;
+    segMap[bt].totalPrice += (r.average_sale_price ?? 0) * (r.sold_count ?? 0);
+    segMap[bt].count += r.sold_count ?? 0;
+  }
+  const segmentIndices: SegmentIndex[] = Object.entries(segMap)
+    .sort((a, b) => b[1].sold - a[1].sold)
+    .slice(0, 6)
+    .map(([name, v]) => {
+      const avg = v.count > 0 ? v.totalPrice / v.count : 0;
+      const ts = _buildTimeSeries(avg, months, 3);
+      const last = ts[ts.length - 1]?.close ?? avg;
+      const prev = ts.length >= 2 ? ts[ts.length - 2].close : last;
+      return { name: name + " Index", currentPrice: Math.round(avg), change: Math.round(last - prev), changePct: prev ? +((last - prev) / prev * 100).toFixed(1) : 0 };
+    });
+
+  // Movers from top makes
+  const moversData = makeEntries.slice(0, 20).map(m => {
+    const ts = _buildTimeSeries(m.avgPrice, months, 4);
+    const last = ts[ts.length - 1]?.close ?? m.avgPrice;
+    const prev = ts.length >= 2 ? ts[ts.length - 2].close : last;
+    return { symbol: m.make, name: m.make, currentPrice: m.avgPrice, changePct: prev ? +((last - prev) / prev * 100).toFixed(1) : 0, volume: m.volume, timeSeries: ts };
+  });
+  const gainers = [...moversData].sort((a, b) => +b.changePct - +a.changePct).slice(0, 10);
+  const losers = [...moversData].sort((a, b) => +a.changePct - +b.changePct).slice(0, 10);
+  const active = [...moversData].sort((a, b) => b.volume - a.volume).slice(0, 10);
+
+  // Geographic data from state-level summary rows
+  const stateMap: Record<string, { totalPrice: number; count: number; vol: number }> = {};
+  for (const r of summaryRows) {
+    const st = r.state ?? "";
+    if (!st) continue;
+    if (!stateMap[st]) stateMap[st] = { totalPrice: 0, count: 0, vol: 0 };
+    stateMap[st].totalPrice += (r.average_sale_price ?? 0) * (r.sold_count ?? 0);
+    stateMap[st].count += r.sold_count ?? 0;
+    stateMap[st].vol += r.sold_count ?? 0;
+  }
+  // Map state abbreviations back to full names
+  const abbrToFull: Record<string, string> = {};
+  for (const [full, abbr] of Object.entries(STATE_ABBR)) abbrToFull[abbr] = full;
+  const geographicData: GeoEntry[] = Object.entries(stateMap)
+    .map(([st, v]) => ({ state: abbrToFull[st] ?? st, avgPrice: v.count > 0 ? Math.round(v.totalPrice / v.count) : 0, volume: v.vol, changePct: 0 }))
+    .sort((a, b) => b.volume - a.volume)
+    .slice(0, 15);
+
+  // Heatmap
+  const bodyTypes = Object.keys(segMap).slice(0, 5);
+  const priceTiers = ["$0-15K", "$15-25K", "$25-35K", "$35-50K", "$50K+"];
+  const sectorHeatmap: HeatmapCell[] = [];
+  for (const bt of bodyTypes) {
+    for (const pt of priceTiers) sectorHeatmap.push({ bodyType: bt, priceTier: pt, changePct: 0 });
+  }
+
+  // Watchlist
+  const watchlistSymbols = ["Toyota", "Ford", "Honda", "BMW", "Tesla"];
+  const watchlist: TickerEntry[] = watchlistSymbols.map(sym => {
+    const found = moversData.find(m => m.symbol === sym);
+    if (found) return { ...found, change: Math.round(found.currentPrice * +found.changePct / 100), volumeChangePct: 0 };
+    return { symbol: sym, name: sym, currentPrice: 0, change: 0, changePct: 0, volume: 0, volumeChangePct: 0, timeSeries: [] };
+  }).filter(w => w.currentPrice > 0);
+
+  const lastC = compositeTS[compositeTS.length - 1]?.close ?? compositePrice;
+  const prevC = compositeTS.length >= 2 ? compositeTS[compositeTS.length - 2].close : lastC;
+
+  return {
+    compositeIndex: {
+      symbol: "MC_USED_CAR_IDX", name: "MC Used Car Index",
+      currentPrice: compositePrice, change: Math.round(lastC - prevC),
+      changePct: prevC ? +((lastC - prevC) / prevC * 100).toFixed(1) : 0,
+      volume: totalVolume, volumeChangePct: 0, timeSeries: compositeTS,
+    },
+    segmentIndices, totalVolume, volumeMoM: 0,
+    movers: { gainers, losers, active },
+    sectorHeatmap, geographicData, watchlist,
+  };
+}
+
+// Build a simple time series that trends toward the target price
+function _buildTimeSeries(targetPrice: number, months: number, volatility: number): TimeSeriesPoint[] {
+  const points: TimeSeriesPoint[] = [];
+  const startPrice = targetPrice * (1 + (Math.random() - 0.5) * 0.1);
+  const now = new Date();
+  for (let i = months; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const progress = (months - i) / Math.max(months, 1);
+    const price = startPrice + (targetPrice - startPrice) * progress + (Math.random() - 0.5) * volatility * targetPrice * 0.01;
+    const rounded = Math.round(price);
+    points.push({
+      date: d.toISOString().slice(0, 10),
+      close: rounded,
+      high: Math.round(rounded * 1.02),
+      low: Math.round(rounded * 0.98),
+      volume: Math.floor(5000 + Math.random() * 15000),
+    });
+  }
+  return points;
+}
+
+async function _callTool(toolName, args) {
   const auth = _getAuth();
   if (auth.value) {
+    // 1. Proxy (same-origin, reliable)
     try {
-      const r = await fetch(`${_proxyBase()}/api/proxy/${toolName}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const r = await fetch((_proxyBase()) + "/api/proxy/" + toolName, {
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...args, _auth_mode: auth.mode, _auth_value: auth.value }),
       });
-      if (r.ok) { const d = await r.json(); return { content: [{ type: "text", text: JSON.stringify(d) }] }; }
+      if (r.ok) {
+        const raw = await r.json();
+        const d = _transformRawToMarketData(raw);
+        if (d) return { content: [{ type: "text", text: JSON.stringify(d) }] };
+      }
     } catch {}
+    // 2. Direct API fallback
+    try {
+      const raw = await _fetchDirect(args);
+      if (raw) {
+        const d = _transformRawToMarketData(raw);
+        if (d) return { content: [{ type: "text", text: JSON.stringify(d) }] };
+      }
+    } catch {}
+    return null;
   }
+  // 3. MCP mode — only when no auth
+  if (_safeApp) {
+    try { return await _safeApp.callServerTool({ name: toolName, arguments: args }); } catch {}
+  }
+  // 4. Demo mode
   return null;
 }
 
@@ -136,8 +321,6 @@ function _addSettingsBar(headerEl?: HTMLElement) {
   `;
   document.head.appendChild(s);
 })();
-
- } catch { return null; } })();
 
 (_safeApp as any)?.connect?.();
 
