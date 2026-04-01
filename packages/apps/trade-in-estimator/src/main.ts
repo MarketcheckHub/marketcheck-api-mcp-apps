@@ -1,6 +1,7 @@
 import { App } from "@modelcontextprotocol/ext-apps";
 
-const _safeApp = (() => { try { return new App({ name: "trade-in-estimator" });
+let _safeApp: any = null;
+try { _safeApp = new App({ name: "trade-in-estimator" }); } catch {}
 
 // ── Dual-Mode Data Provider ────────────────────────────────────────────
 function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | null } {
@@ -13,8 +14,8 @@ function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | n
 }
 
 function _detectAppMode(): "mcp" | "live" | "demo" {
-  if (_safeApp) return "mcp";
   if (_getAuth().value) return "live";
+  if (_safeApp) return "mcp";
   return "demo";
 }
 
@@ -36,24 +37,152 @@ function _proxyBase(): string {
   return location.protocol.startsWith("http") ? "" : "http://localhost:3001";
 }
 
-async function _callTool(toolName: string, args: Record<string, any>): Promise<any> {
-  if (_safeApp) {
-    try {
-      const r = await _safeApp.callServerTool({ name: toolName, arguments: args }); return r;
-            
-    } catch {}
+// ── Direct MarketCheck API Client (browser → api.marketcheck.com) ──────
+const _MC = "https://api.marketcheck.com";
+async function _mcApi(path, params = {}) {
+  const auth = _getAuth();
+  if (!auth.value) return null;
+  const prefix = path.startsWith("/api/") ? "" : "/v2";
+  const url = new URL(_MC + prefix + path);
+  if (auth.mode === "api_key") url.searchParams.set("api_key", auth.value);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
+  const headers = {};
+  if (auth.mode === "oauth_token") headers["Authorization"] = "Bearer " + auth.value;
+  const res = await fetch(url.toString(), { headers });
+  if (!res.ok) throw new Error("MC API " + res.status);
+  return res.json();
+}
+function _mcDecode(vin) { return _mcApi("/decode/car/neovin/" + vin + "/specs"); }
+function _mcPredict(p) { return _mcApi("/predict/car/us/marketcheck_price/comparables", p); }
+function _mcActive(p) { return _mcApi("/search/car/active", p); }
+function _mcRecent(p) { return _mcApi("/search/car/recents", p); }
+function _mcHistory(vin) { return _mcApi("/history/car/" + vin); }
+function _mcSold(p) { return _mcApi("/api/v1/sold-vehicles/summary", p); }
+function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;delete q.oem;} return _mcApi("/search/car/incentive/oem", q); }
+function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
+function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
+
+async function _fetchDirect(args) {
+  const decode = await _mcDecode(args.vin);
+  const [retail, wholesale] = await Promise.all([
+    _mcPredict({...args,dealer_type:"franchise"}).catch(() => ({})),
+    _mcPredict({...args,dealer_type:"independent"}).catch(() => ({})),
+  ]);
+  const soldComps = await _mcRecent({make:decode?.make,model:decode?.model,year:decode?.year?`${decode.year-1}-${decode.year+1}`:undefined,zip:args.zip,radius:100,rows:10,stats:"price"}).catch(() => ({listings:[],num_found:0}));
+  return {decode,retail,wholesale,soldComps};
+}
+
+function _transformRawToTradeIn(raw: any, args: any): TradeInResult {
+  const d = raw.decode ?? {};
+  const retail = raw.retail ?? {};
+  const wholesale = raw.wholesale ?? {};
+  const soldResult = raw.soldComps ?? {};
+
+  const franchiseFmv = retail.predicted_price ?? retail.marketcheck_price ?? retail.price ?? 0;
+  const independentFmv = wholesale.predicted_price ?? wholesale.marketcheck_price ?? wholesale.price ?? 0;
+  const confLow = retail.price_range?.low ?? (franchiseFmv > 0 ? franchiseFmv * 0.9 : 0);
+  const confHigh = retail.price_range?.high ?? (franchiseFmv > 0 ? franchiseFmv * 1.1 : 0);
+
+  // Trade-in is typically 10-15% below retail; instant cash ~20% below
+  const tradeInValue = independentFmv > 0 ? independentFmv : Math.round(franchiseFmv * 0.88);
+  const tradeInLow = Math.round(tradeInValue * 0.92);
+  const tradeInHigh = Math.round(tradeInValue * 1.08);
+
+  const soldListings = soldResult.listings ?? [];
+  const soldStats = soldResult.stats?.price ?? {};
+  const soldComps: SoldComp[] = soldListings.slice(0, 8).map((l: any) => ({
+    year: l.year ?? l.build?.year ?? d.year ?? 0,
+    make: l.make ?? l.build?.make ?? d.make ?? "",
+    model: (l.model ?? l.build?.model ?? d.model ?? "") + (l.trim ? " " + l.trim : ""),
+    price: l.price ?? 0,
+    miles: l.miles ?? 0,
+    days_to_sell: l.dom ?? l.dom_active ?? 0,
+    location: (l.dealer?.city ?? l.city ?? "") + (l.dealer?.state ?? l.state ? ", " + (l.dealer?.state ?? l.state) : ""),
+  }));
+
+  const now = new Date();
+  const threeMonthsAgo = new Date(now);
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  const fmt = (dt: Date) => dt.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+
+  return {
+    vehicle: {
+      vin: args.vin,
+      year: d.year ?? 0,
+      make: d.make ?? "Unknown",
+      model: d.model ?? "Unknown",
+      trim: d.trim ?? "",
+      engine: d.engine ?? "",
+      transmission: d.transmission ?? "",
+      drivetrain: d.drivetrain ?? "",
+      fuel_type: d.fuel_type ?? "",
+      msrp: d.msrp ?? 0,
+      body_type: d.body_type ?? "",
+    },
+    privatePartyValue: franchiseFmv,
+    privatePartyLow: Math.round(confLow),
+    privatePartyHigh: Math.round(confHigh),
+    tradeInValue,
+    tradeInLow,
+    tradeInHigh,
+    instantCashLow: Math.round(tradeInValue * 0.85),
+    instantCashHigh: Math.round(tradeInValue * 0.95),
+    soldComps,
+    compCount: soldResult.num_found ?? soldComps.length,
+    dateRange: `${fmt(threeMonthsAgo)} - ${fmt(now)}`,
+    geoScope: args.zip ? `Within 100 miles of ${args.zip}` : "Nationwide",
+    tips: _generateTips(args, franchiseFmv, soldStats, d),
+  };
+}
+
+function _generateTips(args: any, fmv: number, soldStats: any, decode: any): string[] {
+  const tips: string[] = [];
+  const avgMiles = soldStats.mean ?? soldStats.avg ?? 0;
+  if (args.miles && avgMiles > 0 && args.miles < avgMiles * 0.8) {
+    tips.push(`Your mileage is below average for this model — comparable vehicles have ${Math.round(avgMiles).toLocaleString()} miles on average`);
+  } else if (args.miles && avgMiles > 0 && args.miles > avgMiles * 1.2) {
+    tips.push(`Your mileage is above average — similar vehicles average ${Math.round(avgMiles).toLocaleString()} miles`);
+  }
+  tips.push("Having maintenance records can add $500-$800 to your selling price");
+  tips.push("Selling privately typically nets 10-15% more than a dealer trade-in");
+  if (decode?.body_type === "SUV" || decode?.body_type === "Truck") {
+    tips.push("SUVs and trucks are in high demand — consider timing your sale for spring/summer");
+  }
+  return tips.slice(0, 4);
+}
+
+async function _callTool(toolName, args) {
   const auth = _getAuth();
   if (auth.value) {
+    // 1. Proxy (same-origin, reliable)
     try {
-      const r = await fetch(`${_proxyBase()}/api/proxy/${toolName}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const r = await fetch((_proxyBase()) + "/api/proxy/" + toolName, {
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...args, _auth_mode: auth.mode, _auth_value: auth.value }),
       });
-      if (r.ok) { const d = await r.json(); return { content: [{ type: "text", text: JSON.stringify(d) }] }; }
+      if (r.ok) {
+        const raw = await r.json();
+        const d = _transformRawToTradeIn(raw, args);
+        return { content: [{ type: "text", text: JSON.stringify(d) }] };
+      }
     } catch {}
+    // 2. Direct API fallback
+    try {
+      const raw = await _fetchDirect(args);
+      if (raw) {
+        const d = _transformRawToTradeIn(raw, args);
+        return { content: [{ type: "text", text: JSON.stringify(d) }] };
+      }
+    } catch {}
+    return null;
   }
+  // 3. MCP mode (Claude, VS Code, etc.) — only when no auth
+  if (_safeApp) {
+    try { return await _safeApp.callServerTool({ name: toolName, arguments: args }); } catch {}
+  }
+  // 4. Demo mode
   return null;
 }
 
@@ -136,8 +265,6 @@ function _addSettingsBar(headerEl?: HTMLElement) {
   `;
   document.head.appendChild(s);
 })();
-
- } catch { return null; } })();
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
