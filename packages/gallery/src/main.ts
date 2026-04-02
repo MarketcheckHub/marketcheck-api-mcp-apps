@@ -22,8 +22,6 @@ const SEGMENTS: { name: string; color: string; icon: string }[] = [
   { name: "Auction House", color: "#84cc16", icon: "&#9654;" },
   { name: "Wholesaler", color: "#78716c", icon: "&#9670;" },
   { name: "Cross-Segment", color: "#a78bfa", icon: "&#8854;" },
-  { name: "Consumer (UK)", color: "#10b981", icon: "&#9733;" },
-  { name: "Dealer (UK)", color: "#f59e0b", icon: "&#9881;" },
   { name: "Auto Media", color: "#d946ef", icon: "&#9998;" },
   { name: "Fleet Manager", color: "#059669", icon: "&#9881;" },
   { name: "Rental/Subscription", color: "#0ea5e9", icon: "&#9670;" },
@@ -32,7 +30,7 @@ const SEGMENTS: { name: string; color: string; icon: string }[] = [
 ];
 
 const APPS: AppDef[] = [
-  // ── Consumer (8 apps — ordered by impact: flagship first) ──
+  // ── Consumer (10 apps) ──
   { id: "vin-market-report", name: "VIN Market Report", tagline: "VIN-based market report — embeddable widget like CarStory.ai", segment: "Consumer" },
   { id: "car-search-compare", name: "Car Search & Compare", tagline: "Find and compare cars side by side", segment: "Consumer" },
   { id: "car-search-app", name: "Car Search", tagline: "Full search with SERP, vehicle details, and natural language search", segment: "Consumer" },
@@ -42,13 +40,16 @@ const APPS: AppDef[] = [
   { id: "used-car-market-index", name: "Used Car Market Index", tagline: "Track prices like Wall Street tracks stocks", segment: "Consumer" },
   { id: "oem-incentives-explorer", name: "OEM Incentives Explorer", tagline: "Cash back, APR, and lease deals by ZIP", segment: "Consumer" },
   { id: "incentive-deal-finder", name: "Incentive Deal Finder", tagline: "Search ALL OEM incentives by budget, not by brand", segment: "Consumer" },
+  { id: "uk-market-explorer", name: "UK Market Explorer", tagline: "Search and compare UK car listings in GBP", segment: "Consumer" },
 
-  // ── Dealer (5 apps — ordered by daily impact) ──
+  // ── Dealer (7 apps) ──
   { id: "lot-pricing-dashboard", name: "Lot Pricing Dashboard", tagline: "See your entire lot priced against the market", segment: "Dealer" },
   { id: "stocking-intelligence", name: "Stocking Intelligence", tagline: "Know what to buy at auction", segment: "Dealer" },
   { id: "pricing-transparency-report", name: "Pricing Transparency Report", tagline: "Shareable market report dealers give buyers", segment: "Dealer" },
   { id: "dealer-inventory-fit-scorer", name: "Dealer Inventory Fit Scorer", tagline: "Which cars match your sales DNA?", segment: "Dealer" },
   { id: "dealer-conquest-analyzer", name: "Dealer Conquest Analyzer", tagline: "Find competitors' best-sellers you should stock", segment: "Dealer" },
+  { id: "uk-dealer-pricing", name: "UK Dealer Pricing", tagline: "UK lot inventory priced against the market", segment: "Dealer" },
+  { id: "deal-finder", name: "Deal Finder", tagline: "Best deals scored by price, DOM, and market position", segment: "Dealer" },
 
   // ── Appraiser (4 apps) ──
   { id: "appraiser-workbench", name: "Appraiser Workbench", tagline: "Complete vehicle valuation studio", segment: "Appraiser" },
@@ -56,48 +57,54 @@ const APPS: AppDef[] = [
   { id: "depreciation-analyzer", name: "Depreciation Analyzer", tagline: "Track how vehicles lose value over time", segment: "Appraiser" },
   { id: "market-trends-dashboard", name: "Market Trends Dashboard", tagline: "The pulse of the automotive market", segment: "Appraiser" },
 
-  // ── Dealership Group (3 apps) ──
+  // ── Dealership Group (4 apps) ──
   { id: "group-operations-center", name: "Group Operations Center", tagline: "Every store, one screen", segment: "Dealership Group" },
   { id: "inventory-balancer", name: "Inventory Balancer", tagline: "Move the right cars to the right stores", segment: "Dealership Group" },
   { id: "location-benchmarking", name: "Location Benchmarking", tagline: "Rank and compare your locations", segment: "Dealership Group" },
+  { id: "group-health-scorecard", name: "Group Health Scorecard", tagline: "0-100 health score per rooftop with alerts", segment: "Dealership Group" },
 
-  // ── Lender (3 apps — ordered by workflow: single loan → portfolio → stress) ──
+  // ── Lender (4 apps — ordered by workflow: single loan → portfolio → stress) ──
   { id: "underwriting-decision-support", name: "Underwriting Decision Support", tagline: "Single-loan collateral valuation with LTV forecast", segment: "Lender" },
   { id: "portfolio-risk-monitor", name: "Portfolio Risk Monitor", tagline: "Track collateral health across your loan book", segment: "Lender" },
   { id: "lender-portfolio-stress-test", name: "Lender Portfolio Stress Test", tagline: "What-if depreciation scenarios on your loan book", segment: "Lender" },
   { id: "ev-collateral-risk", name: "EV Collateral Risk Monitor", tagline: "EV vs ICE depreciation risk tracking", segment: "Lender" },
 
-  // ── Analyst (3 apps) ──
+  // ── Analyst (6 apps) ──
   { id: "earnings-signal-dashboard", name: "Earnings Signal Dashboard", tagline: "Pre-earnings channel check for auto tickers", segment: "Analyst" },
   { id: "watchlist-monitor", name: "Watchlist Monitor", tagline: "Morning signal scan across your portfolio", segment: "Analyst" },
   { id: "dealer-group-scorecard", name: "Dealer Group Scorecard", tagline: "Benchmark public dealer groups", segment: "Analyst" },
+  { id: "oem-stock-tracker", name: "OEM Stock Tracker", tagline: "Leading indicators for automotive tickers with buy/sell signals", segment: "Analyst" },
+  { id: "pricing-power-tracker", name: "Pricing Power Tracker", tagline: "Discount-to-MSRP trends as margin signals", segment: "Analyst" },
+  { id: "market-share-analyzer", name: "Market Share Analyzer", tagline: "Brand share with basis-point changes and conquest analysis", segment: "Analyst" },
 
   // ── Insurer (2 apps) ──
   { id: "claims-valuation-workbench", name: "Claims Valuation Workbench", tagline: "Total-loss determination with market evidence", segment: "Insurer" },
   { id: "insurance-premium-benchmarker", name: "Insurance Premium Benchmarker", tagline: "Segment-level replacement cost and risk analysis", segment: "Insurer" },
 
-  // ── Manufacturer (2 apps) ──
+  // ── Manufacturer (7 apps) ──
   { id: "brand-command-center", name: "Brand Command Center", tagline: "Your brands vs the competition", segment: "Manufacturer" },
   { id: "regional-demand-allocator", name: "Regional Demand Allocator", tagline: "Allocate inventory where demand is hottest", segment: "Manufacturer" },
+  { id: "oem-depreciation-tracker", name: "OEM Depreciation Tracker", tagline: "How fast are your models losing value vs the competition?", segment: "Manufacturer" },
+  { id: "ev-transition-monitor", name: "EV Transition Monitor", tagline: "Track your electrification progress against the market", segment: "Manufacturer" },
+  { id: "model-contenting-analyzer", name: "Model Contenting Analyzer", tagline: "Which trims and configs are the market buying?", segment: "Manufacturer" },
+  { id: "market-momentum-report", name: "Market Momentum Report", tagline: "Monthly market pulse for strategic planning", segment: "Manufacturer" },
+  { id: "incentive-effectiveness-dashboard", name: "Incentive Effectiveness Dashboard", tagline: "Are your incentives moving metal?", segment: "Manufacturer" },
 
-  // ── Auction House (2 apps) ──
+  // ── Auction House (5 apps) ──
   { id: "auction-lane-planner", name: "Auction Lane Planner", tagline: "Plan lanes, price consignments, target buyers", segment: "Auction House" },
   { id: "auction-arbitrage-finder", name: "Auction Arbitrage Finder", tagline: "Wholesale vs retail spread — find profit opportunities", segment: "Auction House" },
+  { id: "auction-run-list-analyzer", name: "Auction Run List Analyzer", tagline: "Pre-sale VIN evaluation with hammer price predictions", segment: "Auction House" },
+  { id: "consignment-sourcer", name: "Consignment Sourcer", tagline: "Find dealers with aged inventory ripe for consignment", segment: "Auction House" },
+  { id: "auction-dealer-targeting", name: "Auction Dealer Targeting", tagline: "Identify high-volume buyers in your target market", segment: "Auction House" },
 
   // ── Wholesaler (1 app) ──
   { id: "wholesale-vehicle-router", name: "Wholesale Vehicle Router", tagline: "Paste VINs, get dealer-match rankings", segment: "Wholesaler" },
 
-  // ── Cross-Segment (3 apps) ──
+  // ── Cross-Segment (4 apps) ──
   { id: "ev-market-monitor", name: "EV Market Monitor", tagline: "The EV transition in one dashboard", segment: "Cross-Segment" },
   { id: "vin-history-detective", name: "VIN History Detective", tagline: "Full listing timeline — dealer hops, price changes, red flags", segment: "Cross-Segment" },
   { id: "market-anomaly-detector", name: "Market Anomaly Detector", tagline: "Find underpriced vehicles and pricing outliers", segment: "Cross-Segment" },
   { id: "uk-market-trends", name: "UK Market Trends", tagline: "Macro UK automotive market intelligence", segment: "Cross-Segment" },
-
-  // ── Consumer (UK) (1 app) ──
-  { id: "uk-market-explorer", name: "UK Market Explorer", tagline: "Search and compare UK car listings in GBP", segment: "Consumer (UK)" },
-
-  // ── Dealer (UK) (1 app) ──
-  { id: "uk-dealer-pricing", name: "UK Dealer Pricing", tagline: "UK lot inventory priced against the market", segment: "Dealer (UK)" },
 
   // ── Auto Media (1 app) ──
   { id: "auto-journalist-briefing", name: "Auto Journalist Briefing", tagline: "One-page market briefing with quotable data points", segment: "Auto Media" },
@@ -108,8 +115,11 @@ const APPS: AppDef[] = [
   // ── Rental/Subscription (1 app) ──
   { id: "rental-fleet-valuator", name: "Rental Fleet Valuator", tagline: "Mileage-adjusted fleet valuation with rotation timing", segment: "Rental/Subscription" },
 
-  // ── Lender Sales (1 app) ──
+  // ── Lender Sales (4 apps) ──
   { id: "territory-pipeline", name: "Territory Pipeline", tagline: "Find dealers who need floor plan", segment: "Lender Sales" },
+  { id: "floor-plan-opportunity-scanner", name: "Floor Plan Opportunity Scanner", tagline: "Find dealers with aging inventory who need floor plan financing", segment: "Lender Sales" },
+  { id: "dealer-intelligence-brief", name: "Dealer Intelligence Brief", tagline: "Dealer profile data for pitch prep", segment: "Lender Sales" },
+  { id: "subprime-opportunity-finder", name: "Subprime Opportunity Finder", tagline: "Identify subprime-heavy dealers for lending products", segment: "Lender Sales" },
 
   // ── Chat Demos (7 apps — each uses a different chat SDK) ──
   { id: "chat-vercel-ai", name: "AI Car Advisor (Vercel AI SDK)", tagline: "Conversational car shopping with Claude streaming", segment: "Chat Demos" },
@@ -120,6 +130,14 @@ const APPS: AppDef[] = [
   { id: "chat-streamlit", name: "Quick Market Check (Streamlit)", tagline: "Lightweight Python chat for data teams", segment: "Chat Demos" },
   { id: "chat-langchain", name: "AI Agent Explorer (LangChain)", tagline: "Autonomous agent with visible reasoning chains", segment: "Chat Demos" },
 ];
+
+// Apps that are tested and ready for live demo
+const READY_APPS = new Set([
+  "vin-market-report", "trade-in-estimator", "used-car-market-index",
+  "car-search-app",
+  "chat-vercel-ai", "chat-copilotkit", "chat-assistant-ui", "chat-sdk-bot",
+  "chat-chainlit", "chat-streamlit", "chat-langchain",
+]);
 
 // ── State ───────────────────────────────────────────────────────────────
 
@@ -941,6 +959,12 @@ body {
   text-decoration: none;
 }
 
+/* Coming Soon — only affects the launch button, not the preview */
+.app-card.coming-soon .app-open-btn {
+  opacity: 0.4; pointer-events: none; cursor: default;
+}
+.app-card.coming-soon .app-open-btn:hover { transform: none; }
+
 /* Share button overlay on thumbnail */
 .thumb-overlay-btns {
   position: absolute;
@@ -1614,13 +1638,18 @@ function showAppOpenModal(appId: string, appName: string) {
   const overlay = document.createElement("div");
   overlay.className = "modal-overlay";
 
+  const savedKey = getApiKey() ?? "";
+  const hasKey = !!savedKey;
+
   overlay.innerHTML = `
     <div class="modal">
-      <h3>Open ${appName}</h3>
+      <h3>Launch ${appName}</h3>
       <p>${isChatApp
         ? "This chat app requires an LLM API key and a MarketCheck API key to work."
-        : "This app works with demo data or live MarketCheck data. How would you like to proceed?"}</p>
-      <div class="auth-field" id="modal-key-field" style="display:${isChatApp ? "block" : "none"};">
+        : hasKey
+          ? "Your API key is saved. You can update it below or launch with the current key."
+          : "Enter your MarketCheck API key for live data, or view with demo data."}</p>
+      <div class="auth-field" id="modal-key-field">
         ${isChatApp ? `
         <label class="auth-label">LLM Provider</label>
         <select class="auth-input" id="modal-llm-provider" style="margin-bottom:12px;cursor:pointer;">
@@ -1635,14 +1664,14 @@ function showAppOpenModal(appId: string, appName: string) {
         </div>
         ` : ""}
         <label class="auth-label">MarketCheck API Key</label>
-        <input class="auth-input" id="modal-api-key" type="password" placeholder="Enter your API key" />
+        <input class="auth-input" id="modal-api-key" type="password" placeholder="Enter your API key" value="${savedKey}" />
         <div class="auth-hint" style="margin-top:6px;">
-          Get a free key at <a href="https://developers.marketcheck.com" target="_blank">developers.marketcheck.com</a>
+          ${hasKey ? "Key is saved. Update it here or launch directly." : 'Get a free key at <a href="https://developers.marketcheck.com" target="_blank">developers.marketcheck.com</a>'}
         </div>
       </div>
       <div class="modal-actions">
         ${isChatApp ? "" : '<button class="btn btn-secondary" id="modal-demo">View Demo</button>'}
-        <button class="btn btn-primary" id="modal-live">${isChatApp ? "Open Chat" : "Use API Key"}</button>
+        <button class="btn btn-primary" id="modal-live">${hasKey ? "Launch with Live Data" : (isChatApp ? "Open Chat" : "Launch with API Key")}</button>
       </div>
     </div>
   `;
@@ -1695,41 +1724,38 @@ function showAppOpenModal(appId: string, appName: string) {
     window.open(`/apps/${appId}/dist/index.html`, "_blank");
   });
 
-  // Live button → toggle key input or open with key
+  // Live button → save key and open app
   document.getElementById("modal-live")!.addEventListener("click", () => {
-    if (!isChatApp && keyField.style.display === "none") {
-      // First click: show key input
-      keyField.style.display = "block";
-      keyInput.value = getApiKey() ?? "";
-      keyInput.focus();
-      document.getElementById("modal-live")!.textContent = "Open with Key";
+    const mcKey = keyInput.value.trim();
+
+    if (isChatApp) {
+      // Chat app: save both keys + provider
+      const llmKey = (document.getElementById("modal-llm-key") as HTMLInputElement)?.value?.trim();
+      const provider = (document.getElementById("modal-llm-provider") as HTMLSelectElement)?.value;
+
+      if (!llmKey || !mcKey) {
+        alert("Both API keys are required for chat apps.");
+        return;
+      }
+      localStorage.setItem("mc_llm_key", llmKey);
+      localStorage.setItem("mc_llm_provider", provider);
+      localStorage.setItem("mc_api_key", mcKey);
+      refreshBadges();
+      renderApiKeyBanner();
+      overlay.remove();
+      window.open(`/apps/${appId}/dist/index.html?api_key=${encodeURIComponent(mcKey)}`, "_blank");
     } else {
-      const mcKey = keyInput.value.trim();
-
-      if (isChatApp) {
-        // Chat app: save both keys + provider
-        const llmKey = (document.getElementById("modal-llm-key") as HTMLInputElement)?.value?.trim();
-        const provider = (document.getElementById("modal-llm-provider") as HTMLSelectElement)?.value;
-
-        if (!llmKey || !mcKey) {
-          alert("Both API keys are required for chat apps.");
-          return;
-        }
-        localStorage.setItem("mc_llm_key", llmKey);
-        localStorage.setItem("mc_llm_provider", provider);
+      // Regular app: save MC key and open
+      if (mcKey) {
         localStorage.setItem("mc_api_key", mcKey);
         refreshBadges();
-        overlay.remove();
-        window.open(`/apps/${appId}/dist/index.html?api_key=${encodeURIComponent(mcKey)}`, "_blank");
-      } else {
-        // Regular app: save MC key only
-        if (mcKey) {
-          localStorage.setItem("mc_api_key", mcKey);
-          refreshBadges();
-          overlay.remove();
-          window.open(`/apps/${appId}/dist/index.html?api_key=${encodeURIComponent(mcKey)}`, "_blank");
-        }
+        renderApiKeyBanner();
       }
+      overlay.remove();
+      const url = mcKey
+        ? `/apps/${appId}/dist/index.html?api_key=${encodeURIComponent(mcKey)}`
+        : `/apps/${appId}/dist/index.html`;
+      window.open(url, "_blank");
     }
   });
 }
@@ -1754,14 +1780,14 @@ function renderHero() {
   content.innerHTML = `
     <div class="hero-badge"><span class="badge-dot"></span> Powered by MarketCheck APIs &amp; MCPs</div>
     <h1>Automotive Market<br><span class="accent-word">Intelligence</span> Apps</h1>
-    <p class="subtitle">52 reference implementations showcasing MarketCheck API &amp; MCP capabilities &mdash; dashboards and AI chat demos for dealers, appraisers, lenders, analysts, manufacturers, insurers, and more. Fork them, build your own, or use as-is.</p>
+    <p class="subtitle">68 reference implementations showcasing MarketCheck API &amp; MCP capabilities &mdash; dashboards and AI chat demos for dealers, appraisers, lenders, analysts, manufacturers, insurers, and more. Fork them, build your own, or use as-is.</p>
     <div class="hero-ctas">
       <a href="#apps" class="btn btn-primary">Explore Apps <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg></a>
       <a href="https://github.com/MarketcheckHub/marketcheck-api-mcp-apps" target="_blank" class="btn btn-secondary">View on GitHub</a>
     </div>
     <div class="hero-stats">
-      <div class="hero-stat"><div class="val">52</div><div class="lbl">Apps</div></div>
-      <div class="hero-stat"><div class="val">18</div><div class="lbl">Segments</div></div>
+      <div class="hero-stat"><div class="val">68</div><div class="lbl">Apps</div></div>
+      <div class="hero-stat"><div class="val">16</div><div class="lbl">Segments</div></div>
       <div class="hero-stat"><div class="val">12</div><div class="lbl">API Tools</div></div>
       <div class="hero-stat"><div class="val">4</div><div class="lbl">Modes</div></div>
     </div>
@@ -1884,7 +1910,7 @@ function renderModes() {
   grid.className = "mode-grid";
 
   const modes = [
-    { color: "yellow", icon: "&#9654;", badge: "DEMO", title: "Demo Mode", desc: "Browse all 45 apps with realistic sample data. No API key required.", link: null },
+    { color: "yellow", icon: "&#9654;", badge: "DEMO", title: "Demo Mode", desc: "Browse all 68 apps with realistic sample data. No API key required.", link: null },
     { color: "green", icon: "&#9919;", badge: "LIVE", title: "Live Data", desc: "Enter your MarketCheck API key to see real market data in any app.", link: '<a class="mode-link" href="https://developers.marketcheck.com" target="_blank">Get a free API key &rarr;</a>' },
     { color: "purple", icon: "&lt;/&gt;", badge: "EMBED", title: "Embed in Your Portal", desc: "Embed any app in your website using an iframe with secure OAuth tokens.", link: '<button class="mode-link" id="btn-show-embed">See embed instructions &rarr;</button>' },
     { color: "blue", icon: "&#10023;", badge: "MCP", title: "AI Assistants", desc: "Use inside Claude, VS Code Copilot, Goose, and other MCP-compatible AI hosts.", link: '<button class="mode-link" id="btn-show-mcp">Setup instructions &rarr;</button>' },
@@ -2212,9 +2238,63 @@ function renderCategoryNav() {
   document.body.appendChild(strip);
 }
 
+// ── API Key Banner (shown above apps when no key is set) ────────────────
+
+function renderApiKeyBanner() {
+  const existing = document.getElementById("api-key-banner");
+  if (existing) existing.remove();
+
+  const banner = document.createElement("div");
+  banner.id = "api-key-banner";
+  const hasKey = isLive();
+
+  banner.innerHTML = `
+    <div style="max-width:900px;margin:0 auto 24px;padding:18px 24px;border-radius:12px;background:${hasKey ? "var(--green-bg,#05966922)" : "var(--yellow-bg,#92400e33)"};border:1px solid ${hasKey ? "var(--green,#34d399)33" : "var(--yellow,#fbbf24)44"};display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:200px;">
+        <div style="font-weight:700;font-size:15px;color:var(--text);margin-bottom:4px;">
+          ${hasKey ? "&#10003; API Key Active &mdash; Apps show live market data" : "&#9888; No API Key Set &mdash; Apps will show demo data"}
+        </div>
+        <div style="font-size:13px;color:var(--text-sec);">
+          ${hasKey ? "Your MarketCheck API key is saved. All apps will fetch real-time data." : "Enter your MarketCheck API key to see real market data in all apps."}
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+        <input id="banner-api-key" type="password" placeholder="${hasKey ? "••••••••••••" : "Enter your API key"}" value="${getApiKey() ?? ""}"
+          style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13px;width:240px;" />
+        <button id="banner-save-key" style="padding:8px 16px;border-radius:8px;border:none;background:var(--brand);color:#fff;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap;">
+          ${hasKey ? "Update" : "Save & Activate"}
+        </button>
+        ${hasKey ? '<button id="banner-clear-key" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text-sec);font-size:13px;cursor:pointer;">Clear</button>' : ""}
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(banner);
+
+  document.getElementById("banner-save-key")?.addEventListener("click", () => {
+    const key = (document.getElementById("banner-api-key") as HTMLInputElement).value.trim();
+    if (key) {
+      localStorage.setItem("mc_api_key", key);
+      refreshBadges();
+      renderApiKeyBanner();
+      showToast("API key saved — apps will now show live data");
+    }
+  });
+
+  document.getElementById("banner-clear-key")?.addEventListener("click", () => {
+    localStorage.removeItem("mc_api_key");
+    localStorage.removeItem("mc_access_token");
+    refreshBadges();
+    renderApiKeyBanner();
+    showToast("API key cleared");
+  });
+}
+
 // ── App Grid ────────────────────────────────────────────────────────────
 
 function renderApps() {
+  renderApiKeyBanner();
+
   const section = document.createElement("section");
   section.className = "apps section";
   section.id = "apps";
@@ -2250,9 +2330,10 @@ function renderApps() {
 
     for (const app of apps) {
       const live = isLive();
+      const isReady = READY_APPS.has(app.id);
 
       const card = document.createElement("div");
-      card.className = "app-card stagger";
+      card.className = `app-card stagger${isReady ? "" : " coming-soon"}`;
       card.style.animationDelay = `${delay * 0.04}s`;
       delay++;
 
@@ -2305,27 +2386,17 @@ function renderApps() {
         </div>
         <div class="app-tagline">${app.tagline}</div>
         <div class="app-footer">
-          <a href="/app/${app.id}/" class="app-details-btn">View Details</a>
-          <button class="app-open-btn" data-app-id="${app.id}" data-app-name="${app.name}">Launch App &#8594;</button>
+          <a href="/app/${app.id}/" class="app-details-btn">How to build?</a>
+          <button class="app-open-btn" data-app-id="${app.id}" data-app-name="${app.name}">${isReady ? "Launch App &#8594;" : "Coming Soon"}</button>
         </div>
       `;
 
-      // Open button click handler
+      // Open button click handler — always show modal for key confirmation
       card.querySelector(".app-open-btn")!.addEventListener("click", (e) => {
         e.preventDefault();
         const id = (e.currentTarget as HTMLElement).getAttribute("data-app-id")!;
         const name = (e.currentTarget as HTMLElement).getAttribute("data-app-name")!;
-
-        if (isLive()) {
-          // Has auth — open directly with key
-          const authParam = getAccessToken()
-            ? `access_token=${encodeURIComponent(getAccessToken()!)}`
-            : `api_key=${encodeURIComponent(getApiKey()!)}`;
-          window.open(`/apps/${id}/dist/index.html?${authParam}`, "_blank");
-        } else {
-          // No auth — show modal with Demo / API Key options
-          showAppOpenModal(id, name);
-        }
+        showAppOpenModal(id, name);
       });
 
       // Carousel navigation
