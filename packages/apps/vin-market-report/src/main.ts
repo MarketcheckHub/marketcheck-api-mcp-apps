@@ -20,8 +20,11 @@ function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | n
 }
 
 function _detectAppMode(): "mcp" | "live" | "demo" {
-  if (_safeApp) return "mcp";
+  // Auth (URL or localStorage) takes priority — run in standalone live mode
   if (_getAuth().value) return "live";
+  // Only use MCP mode when no auth AND we're actually embedded in an MCP host
+  // Detect MCP host by checking for window.parent being different (iframe inside host)
+  if (_safeApp && window.parent !== window) return "mcp";
   return "demo";
 }
 
@@ -36,6 +39,12 @@ function _getUrlParams(): Record<string, string> {
     const v = params.get(key);
     if (v) result[key] = v;
   }
+  // Aliases: askingPrice → price, mileage → miles, zipcode/zip_code → zip
+  if (!result.price && params.get("askingPrice")) result.price = params.get("askingPrice")!;
+  if (!result.price && params.get("asking_price")) result.price = params.get("asking_price")!;
+  if (!result.miles && params.get("mileage")) result.miles = params.get("mileage")!;
+  if (!result.zip && params.get("zipcode")) result.zip = params.get("zipcode")!;
+  if (!result.zip && params.get("zip_code")) result.zip = params.get("zip_code")!;
   return result;
 }
 
@@ -112,7 +121,16 @@ function _transformRawToCarStory(raw: any, args: any): any {
   const stats = activeResult.stats ?? {};
   const priceStats = stats.price ?? {};
   const milesStats = stats.miles ?? {};
-  const domStats = stats.dom ?? {};
+  const domStats = stats.dom ?? stats.days_on_market ?? {};
+
+  // Compute from listings as fallback when stats API returns empty
+  const _listings = activeResult.listings ?? [];
+  function _avgField(arr: any[], ...keys: string[]): number {
+    const vals = arr.map(l => { for (const k of keys) { if (l[k] != null && l[k] > 0) return l[k]; } return 0; }).filter(v => v > 0);
+    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  }
+  const computedAvgDom = _avgField(_listings, "dom", "days_on_market");
+  const computedAvgMiles = _avgField(_listings, "miles");
 
   const effectiveAskingPrice = args.askingPrice ?? franchiseFmv;
   const minPrice = priceStats.min ?? confLow;
@@ -137,7 +155,7 @@ function _transformRawToCarStory(raw: any, args: any): any {
     year: l.year ?? vehicle.year, make: l.make ?? vehicle.make, model: l.model ?? vehicle.model,
     trim: l.trim ?? "", price: l.price ?? 0, miles: l.miles ?? 0,
     city: l.dealer?.city ?? "", state: l.dealer?.state ?? "",
-    dom: l.days_on_market ?? 0, dealerName: l.dealer?.name ?? "Unknown",
+    dom: l.dom ?? l.days_on_market ?? 0, dealerName: l.dealer?.name ?? "Unknown",
     distance: l.dist ?? 0, vdpUrl: l.vdp_url ?? "",
   }));
 
@@ -201,7 +219,7 @@ function _transformRawToCarStory(raw: any, args: any): any {
   const marketTrend = {
     direction: trendDirection,
     pctChange30d: Math.round(pctChange30d * 10) / 10,
-    avgDom: Math.round(domStats.avg ?? domStats.mean ?? 30),
+    avgDom: Math.round(domStats.avg ?? domStats.mean ?? computedAvgDom ?? 0),
     inventoryChange: Math.round(inventoryChange * 10) / 10,
   };
 
@@ -216,12 +234,25 @@ function _transformRawToCarStory(raw: any, args: any): any {
 
   return {
     vehicle, askingPrice: effectiveAskingPrice, miles: args.miles ?? 0,
-    marketPosition: {
-      totalActive: activeResult.num_found ?? 0,
-      medianPrice: priceStats.median ?? priceStats.avg ?? franchiseFmv,
-      avgPrice: priceStats.avg ?? franchiseFmv, minPrice, maxPrice,
-      avgMiles: milesStats.avg ?? 0, avgDom: Math.round(domStats.avg ?? 0), percentile,
-    },
+    marketPosition: (() => {
+      const avgMiles = Math.round(milesStats.avg ?? milesStats.mean ?? computedAvgMiles);
+      const avgDom = Math.round(domStats.avg ?? domStats.mean ?? computedAvgDom);
+      const minMiles = Math.round(milesStats.min ?? (Math.min(..._listings.map((l: any) => l.miles ?? Infinity).filter((m: number) => m < Infinity)) || 0));
+      const maxMiles = Math.round(milesStats.max ?? (Math.max(..._listings.map((l: any) => l.miles ?? 0)) || 0));
+      const minDom = Math.round(domStats.min ?? (Math.min(..._listings.map((l: any) => l.dom ?? l.days_on_market ?? Infinity).filter((d: number) => d < Infinity)) || 0));
+      const maxDom = Math.round(domStats.max ?? (Math.max(..._listings.map((l: any) => l.dom ?? l.days_on_market ?? 0)) || 0));
+      const thisMiles = args.miles ?? 0;
+      const milesRange = maxMiles - minMiles || 1;
+      const milesPercentile = thisMiles > 0 ? Math.max(0, Math.min(100, ((thisMiles - minMiles) / milesRange) * 100)) : 50;
+      const domPercentile = 0; // we don't have DOM for subject vehicle
+      return {
+        totalActive: activeResult.num_found ?? 0,
+        medianPrice: priceStats.median ?? priceStats.avg ?? franchiseFmv,
+        avgPrice: priceStats.avg ?? franchiseFmv, minPrice, maxPrice,
+        avgMiles, avgDom, minMiles, maxMiles, minDom, maxDom,
+        percentile, milesPercentile, domPercentile,
+      };
+    })(),
     pricePrediction: { franchisePrice: franchiseFmv, independentPrice: independentFmv, confidenceLow: confLow, confidenceHigh: confHigh },
     dealScore, dealLabel, comparables, soldComps, priceHistory, depreciation, marketTrend, incentives,
     isNew: vehicle.year >= new Date().getFullYear(),
@@ -269,7 +300,7 @@ function _addSettingsBar(headerEl?: HTMLElement) {
   const bar = document.createElement("div");
   bar.style.cssText = "display:flex;align-items:center;gap:8px;margin-left:auto;";
   const colors: Record<string, { bg: string; fg: string; label: string }> = {
-    mcp: { bg: "#1e40af22", fg: "#60a5fa", label: "MCP" },
+    mcp: { bg: "#05966922", fg: "#34d399", label: "LIVE" },
     live: { bg: "#05966922", fg: "#34d399", label: "LIVE" },
     demo: { bg: "#92400e88", fg: "#fbbf24", label: "DEMO" },
   };
@@ -364,7 +395,13 @@ interface MarketPosition {
   maxPrice: number;
   avgMiles: number;
   avgDom: number;
+  minMiles: number;
+  maxMiles: number;
+  minDom: number;
+  maxDom: number;
   percentile: number;
+  milesPercentile: number;
+  domPercentile: number;
 }
 
 interface PricePrediction {
@@ -479,7 +516,13 @@ function getMockData(vin: string, askingPrice?: number, miles?: number, zip?: st
       maxPrice: 34900,
       avgMiles: 38500,
       avgDom: 32,
+      minMiles: 12000,
+      maxMiles: 78000,
+      minDom: 3,
+      maxDom: 95,
       percentile: Math.max(0, Math.min(100, ((ap - 22100) / (34900 - 22100)) * 100)),
+      milesPercentile: Math.max(0, Math.min(100, ((ml - 12000) / (78000 - 12000)) * 100)),
+      domPercentile: 0,
     },
     pricePrediction: {
       franchisePrice: 27200,
@@ -799,15 +842,26 @@ function drawPriceHistoryChart(canvas: HTMLCanvasElement, entries: PriceHistoryE
   ctx.fillStyle = grad;
   ctx.fill();
 
-  // Data points + labels
+  // Data points + labels — skip labels when points are too close together
+  const minLabelGap = 60; // minimum pixels between labeled points
+  let lastLabelX = -Infinity;
+  const isFirst = (i: number) => i === 0;
+  const isLast = (i: number) => i === points.length - 1;
+
   for (let i = 0; i < points.length; i++) {
+    const showLabel = isFirst(i) || isLast(i) || (points[i].x - lastLabelX >= minLabelGap);
+
+    // Always draw the dot (small if skipping label)
     ctx.beginPath();
-    ctx.arc(points[i].x, points[i].y, 5, 0, 2 * Math.PI);
+    ctx.arc(points[i].x, points[i].y, showLabel ? 5 : 3, 0, 2 * Math.PI);
     ctx.fillStyle = "#3b82f6";
     ctx.fill();
     ctx.strokeStyle = "#0f172a";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = showLabel ? 2 : 1;
     ctx.stroke();
+
+    if (!showLabel) continue;
+    lastLabelX = points[i].x;
 
     // Price label above point
     ctx.font = "bold 10px -apple-system, sans-serif";
@@ -821,7 +875,7 @@ function drawPriceHistoryChart(canvas: HTMLCanvasElement, entries: PriceHistoryE
     ctx.font = "10px -apple-system, sans-serif";
     ctx.fillStyle = "#64748b";
     ctx.textBaseline = "top";
-    ctx.fillText(d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }), points[i].x, padT + chartH + 6);
+    ctx.fillText(d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), points[i].x, padT + chartH + 6);
 
     // Dealer name
     ctx.font = "9px -apple-system, sans-serif";
@@ -1028,13 +1082,110 @@ async function main() {
     ? "margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:transparent;color:#e2e8f0;overflow-x:hidden;"
     : "margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;color:#e2e8f0;overflow-x:hidden;";
 
+  // ── Report History (sessionStorage, max 1000) ──
+  const HISTORY_KEY = "mc_vin_report_history";
+  type HistoryEntry = { vin: string; price?: string; miles?: string; zip?: string; vehicle?: string; date: string };
+  function getHistory(): HistoryEntry[] { try { return JSON.parse(sessionStorage.getItem(HISTORY_KEY) ?? "[]"); } catch { return []; } }
+  function saveHistory(entry: HistoryEntry) {
+    const hist = getHistory().filter(h => !(h.vin === entry.vin && h.price === entry.price));
+    hist.unshift(entry);
+    if (hist.length > 1000) hist.length = 1000;
+    sessionStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
+  }
+
+  // ── Layout: sidebar + main ──
+  let sidebar: HTMLElement | null = null;
+  let historyList: HTMLElement | null = null;
+
+  const outerWrap = document.createElement("div");
+  outerWrap.style.cssText = compact ? "" : "display:flex;max-width:1400px;margin:0 auto;padding:16px 20px;gap:16px;";
+  document.body.appendChild(outerWrap);
+
+  if (!compact) {
+    sidebar = document.createElement("div");
+    sidebar.style.cssText = "width:260px;flex-shrink:0;position:sticky;top:16px;align-self:flex-start;max-height:calc(100vh - 32px);overflow:hidden;display:flex;flex-direction:column;";
+    sidebar.innerHTML = `<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:14px;flex:1;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="font-size:12px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;">
+        <span>Report History</span>
+        <span id="hist-count" style="font-size:10px;color:#64748b;font-weight:500;">0</span>
+      </div>
+      <div id="hist-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px;"></div>
+    </div>`;
+    outerWrap.appendChild(sidebar);
+    historyList = sidebar.querySelector("#hist-list");
+  }
+
   const container = document.createElement("div");
   container.style.cssText = compact
     ? "max-width:400px;margin:0 auto;padding:8px;"
-    : "max-width:1200px;margin:0 auto;padding:16px 20px;";
-  document.body.appendChild(container);
+    : "flex:1;min-width:0;";
+  outerWrap.appendChild(container);
+
+  function renderHistorySidebar() {
+    if (!historyList) return;
+    const hist = getHistory();
+    sidebar!.querySelector("#hist-count")!.textContent = String(hist.length);
+    historyList.innerHTML = hist.length === 0
+      ? `<div style="font-size:11px;color:#475569;text-align:center;padding:20px 0;">No reports yet.<br>Generate one to start.</div>`
+      : hist.map((h, i) => `<button data-idx="${i}" class="hist-item" style="background:${i === 0 ? "#0f172a" : "transparent"};border:1px solid ${i === 0 ? "#334155" : "transparent"};border-radius:6px;padding:8px 10px;cursor:pointer;text-align:left;color:#e2e8f0;font-family:inherit;transition:all 0.15s;">
+        <div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${h.vehicle || h.vin}</div>
+        <div style="font-size:10px;color:#64748b;margin-top:2px;">${h.vin}${h.price ? " · $" + Number(h.price).toLocaleString() : ""}</div>
+        <div style="font-size:9px;color:#475569;margin-top:1px;">${h.date}</div>
+      </button>`).join("");
+    historyList.querySelectorAll(".hist-item").forEach(btn => {
+      btn.addEventListener("mouseenter", () => { (btn as HTMLElement).style.background = "#0f172a"; (btn as HTMLElement).style.borderColor = "#334155"; });
+      btn.addEventListener("mouseleave", (e) => { const idx = (btn as HTMLElement).dataset.idx; if (idx !== "0") { (btn as HTMLElement).style.background = "transparent"; (btn as HTMLElement).style.borderColor = "transparent"; } });
+      btn.addEventListener("click", () => {
+        const idx = parseInt((btn as HTMLElement).dataset.idx!);
+        const h = getHistory()[idx];
+        if (!h) return;
+        const vinEl = document.getElementById("_vin_input") as HTMLInputElement;
+        const priceEl = document.getElementById("_price_input") as HTMLInputElement;
+        const milesEl = document.getElementById("_miles_input") as HTMLInputElement;
+        const zipEl = document.getElementById("_zip_input") as HTMLInputElement;
+        const genBtnEl = document.getElementById("_gen_btn") as HTMLButtonElement;
+        if (vinEl) vinEl.value = h.vin;
+        if (priceEl) priceEl.value = h.price ?? "";
+        if (milesEl) milesEl.value = h.miles ?? "";
+        if (zipEl) zipEl.value = h.zip ?? "";
+        if (genBtnEl) genBtnEl.click();
+      });
+    });
+  }
+  renderHistorySidebar();
 
   if (!compact) {
+    // Demo mode banner with API key input
+    if (appMode === "demo") {
+      const demoBanner = document.createElement("div");
+      demoBanner.id = "_demo_banner";
+      demoBanner.style.cssText = "background:linear-gradient(135deg,#92400e22,#f59e0b11);border:1px solid #f59e0b44;border-radius:10px;padding:14px 20px;margin-bottom:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;";
+      demoBanner.innerHTML = `
+        <div style="flex:1;min-width:200px;">
+          <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:2px;">&#9888; Demo Mode — Showing sample data</div>
+          <div style="font-size:12px;color:#d97706;">Enter your MarketCheck API key to see real market data. <a href="https://developers.marketcheck.com" target="_blank" style="color:#fbbf24;text-decoration:underline;">Get a free key</a></div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input id="_banner_key" type="text" placeholder="Paste your API key" style="padding:8px 12px;border-radius:6px;border:1px solid #f59e0b44;background:#0f172a;color:#e2e8f0;font-size:13px;width:220px;outline:none;" />
+          <button id="_banner_save" style="padding:8px 16px;border-radius:6px;border:none;background:#f59e0b;color:#0f172a;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">Activate</button>
+        </div>`;
+      container.appendChild(demoBanner);
+
+      demoBanner.querySelector("#_banner_save")!.addEventListener("click", () => {
+        const key = (demoBanner.querySelector("#_banner_key") as HTMLInputElement).value.trim();
+        if (!key) return;
+        localStorage.setItem("mc_api_key", key);
+        demoBanner.style.background = "linear-gradient(135deg,#05966922,#10b98111)";
+        demoBanner.style.borderColor = "#10b98144";
+        demoBanner.innerHTML = `<div style="font-size:13px;font-weight:700;color:#10b981;">&#10003; API key saved — reloading with live data...</div>`;
+        setTimeout(() => location.reload(), 800);
+      });
+
+      (demoBanner.querySelector("#_banner_key") as HTMLInputElement).addEventListener("keydown", (e) => {
+        if (e.key === "Enter") (demoBanner.querySelector("#_banner_save") as HTMLButtonElement).click();
+      });
+    }
+
     // Header
     const header = document.createElement("div");
     header.style.cssText = "background:#1e293b;padding:16px 20px;border-radius:10px;margin-bottom:16px;border:1px solid #334155;display:flex;align-items:center;";
@@ -1064,11 +1215,16 @@ async function main() {
     }
 
     const vinInput = makeField("VIN", "Enter 17-character VIN", { width: "240px", value: urlParams.vin || "KNDCB3LC9L5359658" });
+    vinInput.id = "_vin_input";
     const priceInput = makeField("Asking Price", "$0", { width: "140px", type: "number", value: urlParams.price || "" });
+    priceInput.id = "_price_input";
     const milesInput = makeField("Mileage", "e.g. 35000", { width: "140px", type: "number", value: urlParams.miles || "" });
+    milesInput.id = "_miles_input";
     const zipInput = makeField("ZIP Code", "e.g. 80202", { width: "120px", value: urlParams.zip || "" });
+    zipInput.id = "_zip_input";
 
     const genBtn = document.createElement("button");
+    genBtn.id = "_gen_btn";
     genBtn.textContent = "Generate Report";
     genBtn.style.cssText = "padding:10px 28px;border-radius:6px;font-size:14px;font-weight:700;cursor:pointer;border:none;background:#3b82f6;color:#fff;height:42px;align-self:flex-end;transition:background 0.15s;";
     genBtn.addEventListener("mouseenter", () => { genBtn.style.background = "#2563eb"; });
@@ -1126,11 +1282,15 @@ async function main() {
         data = getMockData(vin, price ? Number(price) : undefined, miles ? Number(miles) : undefined, zip);
       }
       renderFullReport(data, results);
+      saveHistory({ vin, price: price || undefined, miles: miles || undefined, zip: zip || undefined, vehicle: `${data.vehicle.year} ${data.vehicle.make} ${data.vehicle.model}`, date: new Date().toLocaleString() });
+      renderHistorySidebar();
     } catch (err: any) {
       console.warn("Report generation failed, using demo data:", err?.message ?? err);
       await new Promise(r => setTimeout(r, 400));
       data = getMockData(vin, price ? Number(price) : undefined, miles ? Number(miles) : undefined, zip);
       renderFullReport(data, results);
+      saveHistory({ vin, price: price || undefined, miles: miles || undefined, zip: zip || undefined, vehicle: `${data.vehicle.year} ${data.vehicle.make} ${data.vehicle.model}`, date: new Date().toLocaleString() });
+      renderHistorySidebar();
     }
 
     btn.disabled = false;
@@ -1252,23 +1412,34 @@ async function main() {
 
     const pctile = data.marketPosition.percentile;
     const pctColor = pctile <= 30 ? "#10b981" : pctile <= 60 ? "#f59e0b" : "#ef4444";
-    const rangeBar = `
-      <div style="margin-top:8px;">
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:4px;">
-          <span>${fmtCurrency(data.marketPosition.minPrice)}</span>
-          <span>Market Range</span>
-          <span>${fmtCurrency(data.marketPosition.maxPrice)}</span>
-        </div>
-        <div style="position:relative;height:28px;background:#0f172a;border-radius:6px;overflow:hidden;border:1px solid #334155;">
-          <div style="position:absolute;left:0;top:0;height:100%;width:${pctile}%;background:linear-gradient(90deg,#10b98125,${pctColor}35);border-radius:6px 0 0 6px;"></div>
-          <div style="position:absolute;left:${pctile}%;top:0;height:100%;width:3px;background:${pctColor};border-radius:1px;transform:translateX(-1.5px);" title="This Car: ${Math.round(pctile)}th percentile"></div>
-          <div style="position:absolute;left:${pctile}%;top:-16px;transform:translateX(-50%);font-size:10px;font-weight:700;color:${pctColor};">${Math.round(pctile)}%ile</div>
-        </div>
-        <div style="font-size:11px;color:#94a3b8;margin-top:6px;text-align:center;">This vehicle is priced higher than ${Math.round(pctile)}% of similar cars in the market</div>
-      </div>
-    `;
 
-    mktSection.innerHTML = `<h3 style="font-size:13px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 12px 0;">Market Position</h3>${kpiRibbon}${rangeBar}`;
+    function makeRangeBar(label: string, minVal: string, maxVal: string, pct: number, color: string, caption: string): string {
+      return `<div style="margin-top:12px;">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:4px;">
+          <span>${minVal}</span><span>${label}</span><span>${maxVal}</span>
+        </div>
+        <div style="position:relative;height:24px;background:#0f172a;border-radius:6px;overflow:hidden;border:1px solid #334155;">
+          <div style="position:absolute;left:0;top:0;height:100%;width:${pct}%;background:linear-gradient(90deg,#10b98125,${color}35);border-radius:6px 0 0 6px;"></div>
+          <div style="position:absolute;left:${pct}%;top:0;height:100%;width:3px;background:${color};border-radius:1px;transform:translateX(-1.5px);"></div>
+          <div style="position:absolute;left:${pct}%;top:50%;transform:translate(-50%,-50%);font-size:9px;font-weight:700;color:${color};background:#0f172aCC;padding:1px 6px;border-radius:3px;">${Math.round(pct)}%ile</div>
+        </div>
+        <div style="font-size:10px;color:#94a3b8;margin-top:4px;text-align:center;">${caption}</div>
+      </div>`;
+    }
+
+    const priceBar = makeRangeBar("Price Range", fmtCurrency(data.marketPosition.minPrice), fmtCurrency(data.marketPosition.maxPrice), pctile, pctColor,
+      `This vehicle is priced higher than ${Math.round(pctile)}% of similar cars`);
+
+    const milesPctile = data.marketPosition.milesPercentile;
+    const milesColor = milesPctile <= 30 ? "#10b981" : milesPctile <= 60 ? "#f59e0b" : "#ef4444";
+    const milesBar = data.miles > 0 ? makeRangeBar("Mileage Range", fmtNumber(data.marketPosition.minMiles) + " mi", fmtNumber(data.marketPosition.maxMiles) + " mi", milesPctile, milesColor,
+      `This vehicle has more miles than ${Math.round(milesPctile)}% of similar cars`) : "";
+
+    const domBar = data.marketPosition.maxDom > 0 ? makeRangeBar("Days on Market Range", data.marketPosition.minDom + "d", data.marketPosition.maxDom + "d",
+      Math.round(((data.marketPosition.avgDom - data.marketPosition.minDom) / (data.marketPosition.maxDom - data.marketPosition.minDom || 1)) * 100), "#3b82f6",
+      `Average listing sits for ${data.marketPosition.avgDom} days in this segment`) : "";
+
+    mktSection.innerHTML = `<h3 style="font-size:13px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 12px 0;">Market Position</h3>${kpiRibbon}${priceBar}${milesBar}${domBar}`;
     results.appendChild(mktSection);
 
     // ── Section 4: Price Prediction ──
@@ -1316,6 +1487,58 @@ async function main() {
       compSection.style.cssText = "margin-bottom:16px;";
       compSection.innerHTML = `<h3 style="font-size:14px;font-weight:600;color:#f8fafc;margin:0 0 12px 0;">Active Comparables Nearby</h3>`;
 
+      // ── Cluster strips: Price, Miles, DOM ──
+      const comps = data.comparables;
+      const thisPrice = data.askingPrice;
+      const thisMiles = data.miles;
+
+      function clusterStrip(label: string, values: number[], thisVal: number | null, fmt: (v: number) => string, lowBetter: boolean): string {
+        if (values.length === 0) return "";
+        const allVals = thisVal != null && thisVal > 0 ? [...values, thisVal] : values;
+        const lo = Math.min(...allVals);
+        const hi = Math.max(...allVals);
+        const range = hi - lo || 1;
+        const pct = (v: number) => ((v - lo) / range) * 100;
+
+        const dots = values.map(v => {
+          const x = pct(v);
+          return `<div style="position:absolute;left:${x}%;top:50%;width:8px;height:8px;border-radius:50%;background:#3b82f6;opacity:0.6;transform:translate(-50%,-50%);" title="${fmt(v)}"></div>`;
+        }).join("");
+
+        const thisMarker = thisVal != null && thisVal > 0 ? (() => {
+          const x = pct(thisVal);
+          const compMedian = values.length > 0 ? values.sort((a, b) => a - b)[Math.floor(values.length / 2)] : thisVal;
+          const isGood = lowBetter ? thisVal <= compMedian : thisVal >= compMedian;
+          const color = isGood ? "#10b981" : "#f59e0b";
+          return `<div style="position:absolute;left:${x}%;top:50%;width:12px;height:12px;border-radius:50%;background:${color};border:2px solid #0f172a;transform:translate(-50%,-50%);z-index:2;" title="This vehicle: ${fmt(thisVal)}"></div>
+                  <div style="position:absolute;left:${x}%;top:-2px;transform:translateX(-50%);font-size:9px;font-weight:700;color:${color};white-space:nowrap;">${fmt(thisVal)}</div>`;
+        })() : "";
+
+        return `<div style="flex:1;min-width:200px;">
+          <div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">${label}</div>
+          <div style="position:relative;height:20px;background:#0f172a;border-radius:10px;border:1px solid #334155;margin-bottom:2px;">
+            ${dots}${thisMarker}
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:9px;color:#475569;">
+            <span>${fmt(lo)}</span><span>${fmt(hi)}</span>
+          </div>
+        </div>`;
+      }
+
+      const clusterHtml = `<div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px 20px;margin-bottom:12px;">
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:12px;">Where this vehicle lands among ${comps.length} comparables</div>
+        <div style="display:flex;gap:24px;flex-wrap:wrap;">
+          ${clusterStrip("Price", comps.map(c => c.price).filter(p => p > 0), thisPrice, fmtCurrency, true)}
+          ${clusterStrip("Mileage", comps.map(c => c.miles).filter(m => m > 0), thisMiles > 0 ? thisMiles : null, v => fmtNumber(v) + " mi", true)}
+          ${clusterStrip("Days on Market", comps.map(c => c.dom).filter(d => d > 0), null, v => v + "d", true)}
+        </div>
+        <div style="display:flex;gap:16px;margin-top:10px;font-size:9px;color:#64748b;">
+          <span style="display:flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:50%;background:#3b82f6;opacity:0.6;"></span> Comparables</span>
+          <span style="display:flex;align-items:center;gap:4px;"><span style="width:10px;height:10px;border-radius:50%;background:#10b981;border:2px solid #0f172a;"></span> This vehicle</span>
+        </div>
+      </div>`;
+      compSection.insertAdjacentHTML("beforeend", clusterHtml);
+
       const scrollRow = document.createElement("div");
       scrollRow.style.cssText = "display:flex;gap:12px;overflow-x:auto;padding-bottom:12px;scrollbar-width:thin;";
 
@@ -1330,6 +1553,10 @@ async function main() {
           ? `<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;background:#10b98122;color:#10b981;border:1px solid #10b98144;margin-top:6px;">Below FMV</span>`
           : "";
 
+        const vdpLink = c.vdpUrl && c.vdpUrl !== "#"
+          ? `<a href="${c.vdpUrl}" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#3b82f6;margin-top:6px;text-decoration:none;" title="View listing">View listing &#8599;</a>`
+          : "";
+
         card.innerHTML = `
           <div style="font-size:13px;font-weight:700;color:#f8fafc;">${c.year} ${c.make} ${c.model}</div>
           <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${c.trim}</div>
@@ -1338,12 +1565,8 @@ async function main() {
           <div style="font-size:11px;color:#94a3b8;">${c.city}, ${c.state} (${c.distance} mi)</div>
           <div style="font-size:10px;color:#64748b;margin-top:2px;">${c.dealerName}</div>
           <div style="font-size:10px;color:#64748b;">${c.dom} days on market</div>
-          ${badge}
+          ${badge}${vdpLink}
         `;
-
-        if (c.vdpUrl && c.vdpUrl !== "#") {
-          card.addEventListener("click", () => window.open(c.vdpUrl, "_blank"));
-        }
         scrollRow.appendChild(card);
       }
 
@@ -1411,14 +1634,15 @@ async function main() {
       depSection.style.cssText = "background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin-bottom:16px;";
 
       const totalDep = data.vehicle.msrp - data.askingPrice;
-      const depPct = data.vehicle.msrp > 0 ? ((totalDep / data.vehicle.msrp) * 100).toFixed(1) : "0";
+      const depPct = data.vehicle.msrp > 0 ? Math.abs((totalDep / data.vehicle.msrp) * 100).toFixed(1) : "0";
+      const depWord = totalDep > 0 ? "depreciation" : "appreciation";
 
       depSection.innerHTML = `<h3 style="font-size:13px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.5px;margin:0 0 4px 0;">Depreciation Story</h3>
-        <p style="font-size:11px;color:#64748b;margin:0 0 4px 0;">From ${fmtCurrency(data.vehicle.msrp)} MSRP to ${fmtCurrency(data.askingPrice)} today: ${depPct}% total depreciation</p>
+        <p style="font-size:11px;color:#64748b;margin:0 0 4px 0;">From ${fmtCurrency(data.vehicle.msrp)} MSRP to ${fmtCurrency(data.askingPrice)} today: ${depPct}% total ${depWord}</p>
         <div style="display:flex;gap:12px;margin:12px 0;flex-wrap:wrap;">
           <div style="background:#0f172a;border-radius:6px;padding:8px 14px;"><span style="font-size:10px;color:#64748b;">MSRP</span><div style="font-size:14px;font-weight:700;color:#e2e8f0;">${fmtCurrency(data.vehicle.msrp)}</div></div>
           <div style="background:#0f172a;border-radius:6px;padding:8px 14px;"><span style="font-size:10px;color:#64748b;">Current Ask</span><div style="font-size:14px;font-weight:700;color:#f59e0b;">${fmtCurrency(data.askingPrice)}</div></div>
-          <div style="background:#0f172a;border-radius:6px;padding:8px 14px;"><span style="font-size:10px;color:#64748b;">Total Loss</span><div style="font-size:14px;font-weight:700;color:#ef4444;">-${fmtCurrency(totalDep)}</div></div>
+          <div style="background:#0f172a;border-radius:6px;padding:8px 14px;"><span style="font-size:10px;color:#64748b;">Total Loss</span><div style="font-size:14px;font-weight:700;color:${totalDep > 0 ? "#ef4444" : "#22c55e"};">${totalDep > 0 ? "-" : "+"}${fmtCurrency(Math.abs(totalDep))}</div></div>
           <div style="background:#0f172a;border-radius:6px;padding:8px 14px;"><span style="font-size:10px;color:#64748b;">1-Year Proj.</span><div style="font-size:14px;font-weight:700;color:#64748b;">${fmtCurrency(data.depreciation[data.depreciation.length - 2]?.value ?? 0)}</div></div>
         </div>`;
 

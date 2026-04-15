@@ -4,7 +4,8 @@
  */
 import { App } from "@modelcontextprotocol/ext-apps";
 
-const _safeApp = (() => { try { return new App({ name: "stocking-intelligence" });
+let _safeApp: any = null;
+try { _safeApp = new App({ name: "stocking-intelligence" }); } catch {}
 
 // ── Dual-Mode Data Provider ────────────────────────────────────────────
 function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | null } {
@@ -40,24 +41,60 @@ function _proxyBase(): string {
   return location.protocol.startsWith("http") ? "" : "http://localhost:3001";
 }
 
-async function _callTool(toolName: string, args: Record<string, any>): Promise<any> {
-  if (_safeApp) {
-    try {
-      const r = await _safeApp.callServerTool({ name: toolName, arguments: args }); return r;
-            
-    } catch {}
+// ── Direct MarketCheck API Client (browser → api.marketcheck.com) ──────
+const _MC = "https://api.marketcheck.com";
+async function _mcApi(path, params = {}) {
+  const auth = _getAuth();
+  if (!auth.value) return null;
+  const prefix = path.startsWith("/api/") ? "" : "/v2";
+  const url = new URL(_MC + prefix + path);
+  if (auth.mode === "api_key") url.searchParams.set("api_key", auth.value);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
+  const headers = {};
+  if (auth.mode === "oauth_token") headers["Authorization"] = "Bearer " + auth.value;
+  const res = await fetch(url.toString(), { headers });
+  if (!res.ok) throw new Error("MC API " + res.status);
+  return res.json();
+}
+function _mcDecode(vin) { return _mcApi("/decode/car/neovin/" + vin + "/specs"); }
+function _mcPredict(p) { return _mcApi("/predict/car/us/marketcheck_price/comparables", p); }
+function _mcActive(p) { return _mcApi("/search/car/active", p); }
+function _mcRecent(p) { return _mcApi("/search/car/recents", p); }
+function _mcHistory(vin) { return _mcApi("/history/car/" + vin); }
+function _mcSold(p) { return _mcApi("/api/v1/sold-vehicles/summary", p); }
+function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;delete q.oem;} return _mcApi("/search/car/incentive/oem", q); }
+function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
+function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
+
+async function _fetchDirect(args) {
+  const [demandData,segmentDemand] = await Promise.all([_mcSold({state:args.state,ranking_dimensions:"make,model",ranking_measure:"sold_count",ranking_order:"desc",top_n:30}),_mcSold({state:args.state,ranking_dimensions:"body_type",ranking_measure:"sold_count,average_sale_price,average_days_on_market"})]);
+  return {demandData,segmentDemand};
+}
+
+async function _callTool(toolName, args) {
+  // 1. MCP mode (Claude, VS Code, etc.)
+  if (_safeApp) {
+    try { const r = _safeApp.callServerTool({ name: toolName, arguments: args }); return r; } catch {}
+  }
+  // 2. Direct API mode (browser → api.marketcheck.com)
   const auth = _getAuth();
   if (auth.value) {
     try {
-      const r = await fetch(`${_proxyBase()}/api/proxy/${toolName}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const data = await _fetchDirect(args);
+      if (data) return { content: [{ type: "text", text: JSON.stringify(data) }] };
+    } catch (e) { console.warn("Direct API failed, trying proxy:", e); }
+    // 3. Proxy fallback
+    try {
+      const r = await fetch((_proxyBase()) + "/api/proxy/" + toolName, {
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...args, _auth_mode: auth.mode, _auth_value: auth.value }),
       });
       if (r.ok) { const d = await r.json(); return { content: [{ type: "text", text: JSON.stringify(d) }] }; }
     } catch {}
   }
+  // 4. Demo mode (null → app uses mock data)
   return null;
 }
 
@@ -140,8 +177,6 @@ function _addSettingsBar(headerEl?: HTMLElement) {
   `;
   document.head.appendChild(s);
 })();
-
- } catch { return null; } })();
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -395,16 +430,21 @@ function renderHeatmap(cells: HeatmapCell[]): string {
 }
 
 function renderModelTable(models: StockModel[], title: string, isBuy: boolean): string {
+  if (!models.length) return "";
+  const hasMargin = models.some(m => m.expectedMargin > 0);
+  const isUnitCount = models.some(m => m.dsRatio === Math.round(m.dsRatio) && m.dsRatio > 2);
+  const ratioLabel = isUnitCount ? "Units" : "D/S Ratio";
+
   const headerStyle = `padding:8px 12px;text-align:left;font-weight:600;color:#94a3b8;border-bottom:2px solid #334155;font-size:12px;text-transform:uppercase;letter-spacing:0.5px`;
   const headerRight = `${headerStyle};text-align:right`;
   const headers = `
     <tr>
       <th style="${headerStyle}">Make/Model</th>
-      <th style="${headerRight}">D/S Ratio</th>
-      <th style="${headerRight}">Avg Sale Price</th>
+      <th style="${headerRight}">${ratioLabel}</th>
+      <th style="${headerRight}">Avg Price</th>
       <th style="${headerRight}">Avg DOM</th>
       <th style="${headerRight}">Turn Rate</th>
-      <th style="${headerRight}">Exp. Margin</th>
+      ${hasMargin ? `<th style="${headerRight}">Exp. Margin</th>` : ""}
       <th style="${headerStyle};text-align:center">Verdict</th>
     </tr>`;
 
@@ -413,13 +453,14 @@ function renderModelTable(models: StockModel[], title: string, isBuy: boolean): 
     const cellStyle = `padding:8px 12px;border-bottom:1px solid #1e293b;color:#e2e8f0;font-size:13px`;
     const cellRight = `${cellStyle};text-align:right`;
     const ratioColor = isBuy ? "#86efac" : "#fca5a5";
+    const ratioVal = isUnitCount ? String(Math.round(m.dsRatio)) : fmtRatio(m.dsRatio);
     rows += `<tr>
       <td style="${cellStyle};font-weight:600">${m.make} ${m.model}</td>
-      <td style="${cellRight};color:${ratioColor};font-weight:700">${fmtRatio(m.dsRatio)}</td>
+      <td style="${cellRight};color:${ratioColor};font-weight:700">${ratioVal}</td>
       <td style="${cellRight}">${fmtDollar(m.avgSalePrice)}</td>
       <td style="${cellRight}">${m.avgDom}d</td>
       <td style="${cellRight}">${m.turnRate.toFixed(1)}x</td>
-      <td style="${cellRight};color:${isBuy ? "#86efac" : "#fca5a5"}">${fmtDollar(m.expectedMargin)}</td>
+      ${hasMargin ? `<td style="${cellRight};color:${isBuy ? "#86efac" : "#fca5a5"}">${fmtDollar(m.expectedMargin)}</td>` : ""}
       <td style="${cellStyle};text-align:center">${verdictBadge(m.verdict)}</td>
     </tr>`;
   }
@@ -487,14 +528,263 @@ function renderVinChecker(results: VinResult[] | null): string {
         <p style="font-size:12px;color:#64748b;margin-top:2px">Paste up to 10 VINs, one per line, to evaluate</p>
       </div>
       <div style="padding:16px">
-        <textarea id="vin-input" placeholder="Paste VINs here, one per line...&#10;e.g.&#10;1FTFW1E82MFA00001&#10;2T1BURHE0JC000002" style="width:100%;min-height:120px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:8px;padding:12px;font-family:monospace;font-size:13px;resize:vertical;outline:none"></textarea>
-        <div style="margin-top:12px;display:flex;align-items:center;gap:12px">
+        <div style="display:flex;gap:16px;margin-bottom:12px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <textarea id="vin-input" placeholder="Paste VINs here, one per line...&#10;e.g.&#10;1FTFW1E82MFA00001&#10;2T1BURHE0JC000002" style="width:100%;min-height:120px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:8px;padding:12px;font-family:monospace;font-size:13px;resize:vertical;outline:none;box-sizing:border-box"></textarea>
+          </div>
+          <div style="min-width:120px">
+            <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">ZIP Code</label>
+            <input id="vin-zip-input" type="text" placeholder="e.g. 75201" style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:14px;box-sizing:border-box;outline:none" />
+            <div style="font-size:10px;color:#64748b;margin-top:4px">Used for local pricing &amp; supply comparisons</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
           <button id="vin-check-btn" style="background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer;transition:background 0.15s">Check VINs</button>
           <span id="vin-status" style="font-size:12px;color:#64748b"></span>
         </div>
+        <div style="font-size:11px;color:#64748b;margin-top:6px">Each VIN makes ~3 API calls (decode + retail price + wholesale price). Active listing miles used when available.</div>
         <div id="vin-results">${resultsHtml}</div>
       </div>
     </div>`;
+}
+
+// ── Dealer Stock Render Functions ─────────────────────────────────────────────
+
+interface DealerResult {
+  listings: any[];
+  numFound: number;
+  dealerName: string;
+  stats: { avgPrice: number; avgMiles: number; avgDom: number };
+  soldData: { byMakeModel: any; byBodyType: any } | null;
+}
+
+function buildSoldModels(soldData: any): StockModel[] {
+  if (!soldData?.rankings) return [];
+  return soldData.rankings.map((r: any) => {
+    const [make, model] = (r.dimension_value || "").split("|");
+    const soldCount = r.sold_count || 0;
+    const avgPrice = Math.round(r.average_sale_price || 0);
+    const avgDom = Math.round(r.average_days_on_market || 0);
+    const turnRate = avgDom > 0 ? Math.round((30 / avgDom) * 10) / 10 : 0;
+    let verdict: string;
+    if (avgDom <= 20 && soldCount >= 50) verdict = "STRONG BUY";
+    else if (avgDom <= 30) verdict = "BUY";
+    else if (avgDom <= 45) verdict = "WATCH";
+    else if (avgDom <= 60) verdict = "SLOW";
+    else verdict = "AVOID";
+    return { make: make || "Unknown", model: model || "Unknown", dsRatio: soldCount, avgSalePrice: avgPrice, avgDom, turnRate, expectedMargin: 0, verdict };
+  }).filter((m: StockModel) => m.make !== "Unknown");
+}
+
+function renderDealerDashboard(result: DealerResult): string {
+  const { listings, numFound, dealerName: dName, stats, soldData } = result;
+  const total = listings.length;
+
+  const card = (label: string, value: string, color: string) => `
+    <div style="background:#1e293b;border-radius:12px;padding:20px;flex:1;min-width:140px;border:1px solid #334155">
+      <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">${label}</div>
+      <div style="font-size:28px;font-weight:800;color:${color}">${value}</div>
+    </div>`;
+
+  // Build heatmap from inventory body_type × price tier
+  const priceBucket = (p: number): string => {
+    if (p < 15000) return "$0-15K";
+    if (p < 25000) return "$15-25K";
+    if (p < 35000) return "$25-35K";
+    if (p < 50000) return "$35-50K";
+    return "$50K+";
+  };
+  const heatCounts: Record<string, number> = {};
+  const btCounts: Record<string, number> = {};
+  for (const l of listings) {
+    const bt = l.body_type || "Other";
+    const tier = priceBucket(l.price || 0);
+    heatCounts[`${bt}|${tier}`] = (heatCounts[`${bt}|${tier}`] || 0) + 1;
+    btCounts[bt] = (btCounts[bt] || 0) + 1;
+  }
+  const topBodyTypes = Object.entries(btCounts).sort((a, b) => b[1] - a[1]).slice(0, 6).map(e => e[0]);
+  const heatmap: HeatmapCell[] = [];
+  for (const bt of topBodyTypes) {
+    for (const tier of PRICE_TIERS) {
+      const count = heatCounts[`${bt}|${tier}`] || 0;
+      const dsRatio = count === 0 ? 0.3 : count <= 1 ? 0.7 : count <= 3 ? 1.2 : count <= 5 ? 1.8 : 2.5;
+      heatmap.push({ bodyType: bt, priceTier: tier, dsRatio });
+    }
+  }
+  const heatmapHtml = topBodyTypes.length > 0 ? renderHeatmap(heatmap) : "";
+  // Patch renderHeatmap uses BODY_TYPES constant — we need inline heatmap for dynamic body types
+  let heatmapInline = "";
+  if (topBodyTypes.length > 0) {
+    const lookup = new Map<string, number>();
+    for (const c of heatmap) lookup.set(`${c.bodyType}|${c.priceTier}`, c.dsRatio);
+    let hCells = `<th style="padding:10px 14px;text-align:left;font-weight:600;color:#94a3b8;border-bottom:2px solid #334155;background:#0f172a">Body Type</th>`;
+    for (const tier of PRICE_TIERS) hCells += `<th style="padding:10px 14px;text-align:center;font-weight:600;color:#94a3b8;border-bottom:2px solid #334155;background:#0f172a">${tier}</th>`;
+    let hRows = "";
+    for (const bt of topBodyTypes) {
+      let tds = `<td style="padding:10px 14px;font-weight:600;color:#e2e8f0;border-bottom:1px solid #1e293b">${bt}</td>`;
+      for (const tier of PRICE_TIERS) {
+        const ratio = lookup.get(`${bt}|${tier}`) ?? 0;
+        tds += `<td style="padding:10px 14px;text-align:center;font-weight:700;font-size:16px;border-bottom:1px solid #1e293b;background:${heatColor(ratio)};color:${heatTextColor(ratio)}">${fmtRatio(ratio)}</td>`;
+      }
+      hRows += `<tr>${tds}</tr>`;
+    }
+    heatmapInline = `<div style="margin-bottom:24px">
+      <h2 style="font-size:18px;font-weight:700;color:#e2e8f0;margin-bottom:4px">Inventory Concentration Heatmap</h2>
+      <p style="font-size:12px;color:#64748b;margin-bottom:12px">
+        <span style="color:#86efac">Green = High stock</span> &nbsp;|&nbsp; <span style="color:#fde68a">Yellow = Moderate</span> &nbsp;|&nbsp; <span style="color:#fca5a5">Red = Low/None</span>
+      </p>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border-radius:8px;overflow:hidden"><thead><tr>${hCells}</tr></thead><tbody>${hRows}</tbody></table></div>
+    </div>`;
+  }
+
+  // Fast/Slow movers from sold summary (Recents API)
+  let fastTable = "";
+  let slowTable = "";
+  if (soldData?.byMakeModel) {
+    const allSold = buildSoldModels(soldData.byMakeModel);
+    const fast = allSold.filter(m => m.avgDom <= 30).slice(0, 15);
+    const slow = allSold.filter(m => m.avgDom > 45).slice(0, 10);
+    if (fast.length) fastTable = renderModelTable(fast, `Hot Sellers — ${fast.length} Fast-Moving Models (Regional Sold Data)`, true);
+    if (slow.length) slowTable = renderModelTable(slow, `Slow Movers — ${slow.length} Slow-Moving Models (Regional Sold Data)`, false);
+  }
+
+  // Aging alerts from active inventory
+  const aging = listings.filter(l => (l.days_on_market || 0) > 45).sort((a, b) => (b.days_on_market || 0) - (a.days_on_market || 0));
+  let agingHtml = "";
+  if (aging.length) {
+    const thS = `padding:8px 12px;font-weight:600;color:#94a3b8;border-bottom:2px solid #334155;font-size:12px`;
+    let agingRows = "";
+    for (const l of aging) {
+      agingRows += `<tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #1e293b;color:#e2e8f0;font-weight:600">${l.year || ""} ${l.make || ""} ${l.model || ""} ${l.trim || ""}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #1e293b;color:#e2e8f0;text-align:right">${l.price ? fmtDollar(l.price) : "—"}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #1e293b;color:#e2e8f0;text-align:right">${l.miles ? l.miles.toLocaleString() : "—"}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #1e293b;color:#fca5a5;text-align:right;font-weight:700">${l.days_on_market || 0}d</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #1e293b;color:#94a3b8;font-family:monospace;font-size:11px">${l.vin || "—"}</td>
+      </tr>`;
+    }
+    agingHtml = `
+      <div style="margin-top:20px;background:#1e293b;border-radius:12px;border:1px solid #991b1b;overflow:hidden">
+        <div style="padding:14px 16px;border-bottom:1px solid #334155">
+          <h3 style="font-size:16px;font-weight:700;color:#fca5a5">Aging Alerts — ${aging.length} units over 45 DOM</h3>
+        </div>
+        <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+          <thead><tr><th style="${thS};text-align:left">Vehicle</th><th style="${thS};text-align:right">Price</th><th style="${thS};text-align:right">Miles</th><th style="${thS};text-align:right">DOM</th><th style="${thS};text-align:left">VIN</th></tr></thead>
+          <tbody>${agingRows}</tbody>
+        </table></div>
+      </div>`;
+  }
+
+  return `
+    <div style="margin-bottom:16px">
+      <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+        <h2 style="font-size:20px;font-weight:700;color:#e2e8f0">${dName}</h2>
+        <span style="font-size:13px;color:#64748b">${numFound} listings${numFound > total ? " (showing " + total + ")" : ""}</span>
+      </div>
+      <div style="display:flex;gap:16px;margin-bottom:24px;flex-wrap:wrap">
+        ${card("Total Units", String(total), "#60a5fa")}
+        ${card("Avg Price", fmtDollar(stats.avgPrice), "#34d399")}
+        ${card("Avg Miles", stats.avgMiles.toLocaleString(), "#fbbf24")}
+        ${card("Avg DOM", stats.avgDom + "d", stats.avgDom > 45 ? "#fca5a5" : "#86efac")}
+      </div>
+      ${heatmapInline}
+      <div style="display:flex;gap:20px;margin-top:4px;flex-wrap:wrap">
+        <div style="flex:6;min-width:320px">${fastTable}</div>
+        <div style="flex:4;min-width:280px">${slowTable}</div>
+      </div>
+      ${agingHtml}
+    </div>`;
+}
+
+// ── Dealer Data Fetch (self-contained, no IIFE deps) ────────────────────────
+
+function _mcAuthHeaders(): { params: URLSearchParams; headers: Record<string, string> } {
+  const qp = new URLSearchParams(location.search);
+  const apiKey = qp.get("api_key") ?? localStorage.getItem("mc_api_key");
+  const token = qp.get("access_token") ?? localStorage.getItem("mc_access_token");
+  const params = new URLSearchParams();
+  const headers: Record<string, string> = {};
+  if (apiKey) params.set("api_key", apiKey);
+  else if (token) headers["Authorization"] = "Bearer " + token;
+  return { params, headers };
+}
+
+async function _mcFetch(path: string, extra: Record<string, string> = {}): Promise<any> {
+  const { params, headers } = _mcAuthHeaders();
+  for (const [k, v] of Object.entries(extra)) {
+    if (v) params.set(k, v);
+  }
+  const prefix = path.startsWith("/api/") ? "" : "/v2";
+  const res = await fetch(`https://api.marketcheck.com${prefix}${path}?${params.toString()}`, { headers });
+  if (!res.ok) throw new Error("API error " + res.status);
+  return res.json();
+}
+
+async function fetchDealerInventory(idOrDomain: string, carType?: string, rows?: number): Promise<any> {
+  const trimmed = idOrDomain.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  const isNumeric = /^\d+$/.test(trimmed);
+  const dealerParams: Record<string, string> = {
+    rows: String(rows || 50),
+    stats: "price,miles,dom",
+    facets: "make,body_type",
+  };
+  if (isNumeric) dealerParams.dealer_id = trimmed;
+  else dealerParams.seller_domain = trimmed;
+  if (carType) dealerParams.car_type = carType;
+  return _mcFetch("/search/car/active", dealerParams);
+}
+
+async function fetchSoldSummary(state: string): Promise<{ byMakeModel: any; byBodyType: any }> {
+  const [byMakeModel, byBodyType] = await Promise.all([
+    _mcFetch("/api/v1/sold-vehicles/summary", {
+      state, ranking_dimensions: "make,model", ranking_measure: "sold_count,average_sale_price,average_days_on_market",
+      ranking_order: "desc", top_n: "30",
+    }),
+    _mcFetch("/api/v1/sold-vehicles/summary", {
+      state, ranking_dimensions: "body_type", ranking_measure: "sold_count,average_sale_price,average_days_on_market",
+    }),
+  ]);
+  return { byMakeModel, byBodyType };
+}
+
+async function checkVinsLive(vins: string[], zip: string): Promise<VinResult[]> {
+  return Promise.all(
+    vins.slice(0, 10).map(async (vin): Promise<VinResult> => {
+      const cleaned = vin.trim().toUpperCase();
+      try {
+        // Step 1: Decode VIN + check active listings for real miles
+        const [decode, activeLookup] = await Promise.all([
+          _mcFetch("/decode/car/neovin/" + cleaned + "/specs"),
+          _mcFetch("/search/car/active", { vin: cleaned, rows: "1" }).catch(() => null),
+        ]);
+        const year = decode?.year || 0;
+        const make = decode?.make || "Unknown";
+        const model = decode?.model || "Unknown";
+        // Use real miles from active listing if available, else estimate from age
+        const activeListing = activeLookup?.listings?.[0];
+        const realMiles = activeListing?.miles;
+        const currentYear = new Date().getFullYear();
+        const miles = String(realMiles || Math.max(5000, (currentYear - (year || currentYear)) * 12000));
+        // Step 2: Predict retail (franchise) and wholesale (independent) prices
+        const predictParams = { vin: cleaned, miles, zip };
+        const [retail, wholesale] = await Promise.all([
+          _mcFetch("/predict/car/us/marketcheck_price/comparables", { ...predictParams, dealer_type: "franchise" }),
+          _mcFetch("/predict/car/us/marketcheck_price/comparables", { ...predictParams, dealer_type: "independent" }),
+        ]);
+        const retailPrice = Math.round(retail?.marketcheck_price || 0);
+        const wholesalePrice = Math.round(wholesale?.marketcheck_price || 0);
+        const margin = retailPrice - wholesalePrice;
+        const supply = retail?.comparables?.num_found || 0;
+        let verdict: string;
+        if (margin > 4000 && supply < 8) verdict = "BUY";
+        else if (margin < 2000 || supply > 15) verdict = "PASS";
+        else verdict = "CAUTION";
+        return { vin: cleaned, year, make, model, retailPrice, wholesalePrice, expectedMargin: margin, localSupply: supply, verdict };
+      } catch (e: any) {
+        return { vin: cleaned, year: 0, make: "Error", model: e.message || "Failed", retailPrice: 0, wholesalePrice: 0, expectedMargin: 0, localSupply: 0, verdict: "PASS" };
+      }
+    })
+  );
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────────
@@ -515,97 +805,216 @@ async function main() {
   document.body.style.margin = "0";
   document.body.appendChild(root);
 
-  // Show loading state
-  root.innerHTML = `
-    <div style="text-align:center;padding:80px 20px">
-      <div style="font-size:24px;font-weight:700;color:#e2e8f0;margin-bottom:12px">Stocking Intelligence</div>
-      <div style="color:#64748b">Loading market data...</div>
-    </div>`;
-
-  // ── Fetch data ──
-  let data: StockingData;
-  try {
-    const result = await _callTool("stocking-intelligence", { state: "TX", zip: "75201" });
-    data = JSON.parse(
-      typeof result === "string" ? result : (result as { content?: Array<{ text?: string }> })?.content?.[0]?.text ?? "{}"
-    );
-    // Validate shape — fall back to mock if missing keys
-    if (!data.heatmap || !data.buyList || !data.avoidList) {
-      data = getMockStockingData();
-    }
-  } catch {
-    data = getMockStockingData();
+  // ── Demo mode banner ──
+  if (_detectAppMode() === "demo") {
+    const _db = document.createElement("div");
+    _db.id = "_demo_banner";
+    _db.style.cssText = "background:linear-gradient(135deg,#92400e22,#f59e0b11);border:1px solid #f59e0b44;border-radius:10px;padding:14px 20px;margin-bottom:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;";
+    _db.innerHTML = `
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:2px;">&#9888; Demo Mode — Showing sample data</div>
+        <div style="font-size:12px;color:#d97706;">Enter your MarketCheck API key to see real market data. <a href="https://developers.marketcheck.com" target="_blank" style="color:#fbbf24;text-decoration:underline;">Get a free key</a></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="_banner_key" type="text" placeholder="Paste your API key" style="padding:8px 12px;border-radius:6px;border:1px solid #f59e0b44;background:#0f172a;color:#e2e8f0;font-size:13px;width:220px;outline:none;" />
+        <button id="_banner_save" style="padding:8px 16px;border-radius:6px;border:none;background:#f59e0b;color:#0f172a;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">Activate</button>
+      </div>`;
+    document.body.insertBefore(_db, document.body.firstChild);
+    _db.querySelector("#_banner_save").addEventListener("click", () => {
+      const k = _db.querySelector("#_banner_key").value.trim();
+      if (!k) return;
+      localStorage.setItem("mc_api_key", k);
+      _db.style.background = "linear-gradient(135deg,#05966922,#10b98111)";
+      _db.style.borderColor = "#10b98144";
+      _db.innerHTML = '<div style="font-size:13px;font-weight:700;color:#10b981;">&#10003; API key saved — reloading with live data...</div>';
+      setTimeout(() => location.reload(), 800);
+    });
+    _db.querySelector("#_banner_key").addEventListener("keydown", (e) => { if (e.key === "Enter") _db.querySelector("#_banner_save").click(); });
   }
 
-  // ── Render full UI ──
-  function renderUI(vinResults: VinResult[] | null = null) {
+  // ── State ──
+  let currentMode: "vin-list" | "dealer-stock" = "vin-list";
+  let dealerResult: DealerResult | null = null;
+  let vinResults: VinResult[] | null = null;
+  let savedVinText = "";
+  let savedZip = "";
+  let savedDealerInput = "";
+  let savedCondition = "";
+  let savedRows = "50";
+
+  // ── Render ──
+  function render() {
+    const modeBtn = (id: string, label: string, mode: string) => {
+      const active = currentMode === mode;
+      return `<button id="${id}" style="padding:10px 24px;font-size:14px;font-weight:600;border-radius:8px;cursor:pointer;transition:all 0.15s;${
+        active
+          ? "background:#3b82f6;color:#fff;border:1px solid #3b82f6;"
+          : "background:#1e293b;color:#94a3b8;border:1px solid #334155;"
+      }">${label}</button>`;
+    };
+
+    let content = "";
+    if (currentMode === "vin-list") {
+      content = renderVinChecker(vinResults);
+    } else {
+      const inputStyle = "width:100%;padding:10px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:14px;box-sizing:border-box;outline:none";
+      content = `
+        <div style="background:#1e293b;border-radius:12px;border:1px solid #334155;padding:20px;margin-bottom:24px">
+          <h3 style="font-size:16px;font-weight:700;color:#e2e8f0;margin-bottom:12px">Load Dealer Inventory</h3>
+          <div style="display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+            <div style="flex:1;min-width:160px">
+              <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">MarketCheck Dealer ID</label>
+              <input id="dealer-id-input" type="text" placeholder="e.g. 12345" style="${inputStyle}" />
+            </div>
+            <div style="color:#64748b;font-size:13px;font-weight:600;padding-bottom:10px">or</div>
+            <div style="flex:1;min-width:200px">
+              <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">Dealer Website Domain</label>
+              <input id="dealer-domain-input" type="text" placeholder="e.g. www.chicagotoyota.com" style="${inputStyle}" />
+            </div>
+            <div style="min-width:120px">
+              <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px">Condition</label>
+              <select id="dealer-condition" style="${inputStyle};cursor:pointer">
+                <option value="">All</option>
+                <option value="used">Used</option>
+                <option value="new">New</option>
+                <option value="certified">Certified</option>
+              </select>
+            </div>
+            <div style="min-width:100px">
+              <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px"># Vehicles</label>
+              <select id="dealer-rows" style="${inputStyle};cursor:pointer">
+                <option value="25">25</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+              </select>
+            </div>
+            <button id="dealer-load-btn" style="background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap">Load Inventory</button>
+          </div>
+          <div style="font-size:11px;color:#64748b;margin-top:8px">More vehicles = more API calls and longer loading time. Regional sold data is also fetched for fast/slow mover analysis.</div>
+          <div id="dealer-status" style="font-size:12px;color:#64748b;margin-top:6px"></div>
+        </div>
+        ${dealerResult ? renderDealerDashboard(dealerResult) : ""}`;
+    }
+
     root.innerHTML = `
       <div style="max-width:1400px;margin:0 auto">
-        <!-- Header -->
-        <div style="margin-bottom:24px">
-          <h1 style="font-size:26px;font-weight:800;color:#e2e8f0;margin-bottom:4px">Stocking Intelligence</h1>
-          <p style="font-size:13px;color:#64748b">Dealer inventory recommendations based on local demand/supply analysis</p>
-        </div>
-
-        <!-- Demand Heatmap -->
-        ${renderHeatmap(data.heatmap)}
-
-        <!-- Buy / Avoid Lists -->
-        <div style="display:flex;gap:20px;margin-top:4px;flex-wrap:wrap">
-          <div style="flex:6;min-width:320px">
-            ${renderModelTable(data.buyList, "Buy List — Top 15 Models to Stock", true)}
+        <div style="margin-bottom:24px;display:flex;align-items:center;flex-wrap:wrap;gap:16px">
+          <div style="flex:1;min-width:200px">
+            <h1 style="font-size:26px;font-weight:800;color:#e2e8f0;margin-bottom:4px">Stocking Intelligence</h1>
+            <p style="font-size:13px;color:#64748b">Dealer inventory recommendations based on local demand/supply analysis</p>
           </div>
-          <div style="flex:4;min-width:280px">
-            ${renderModelTable(data.avoidList, "Avoid List — 10 Models to Skip", false)}
+          <div style="display:flex;gap:8px">
+            ${modeBtn("mode-vin", "By VIN List", "vin-list")}
+            ${modeBtn("mode-dealer", "By Dealer Stock", "dealer-stock")}
           </div>
         </div>
-
-        <!-- VIN Checker -->
-        ${renderVinChecker(vinResults)}
+        ${content}
       </div>`;
 
-    // Wire up VIN check button
-    const btn = document.getElementById("vin-check-btn") as HTMLButtonElement | null;
-    const textarea = document.getElementById("vin-input") as HTMLTextAreaElement | null;
-    const status = document.getElementById("vin-status") as HTMLSpanElement | null;
-
-    btn?.addEventListener("click", async () => {
-      const raw = textarea?.value ?? "";
-      const vins = raw
-        .split("\n")
-        .map((v) => v.trim())
-        .filter((v) => v.length > 0)
-        .slice(0, 10);
-
-      if (vins.length === 0) {
-        if (status) status.textContent = "Please enter at least one VIN.";
-        return;
-      }
-
-      if (status) status.textContent = `Checking ${vins.length} VIN${vins.length > 1 ? "s" : ""}...`;
-      btn.disabled = true;
-      btn.style.opacity = "0.6";
-
-      let results: VinResult[];
-      try {
-        const res = await _callTool("stocking-intelligence", { state: "TX", zip: "75201", vins });
-        const parsed: VinCheckResponse = JSON.parse(
-          typeof res === "string" ? res : (res as { content?: Array<{ text?: string }> })?.content?.[0]?.text ?? "{}"
-        );
-        results = parsed.results && parsed.results.length > 0 ? parsed.results : getMockVinResults(vins);
-      } catch {
-        results = getMockVinResults(vins);
-      }
-
-      // Re-render with results, preserve VIN text
-      const savedText = textarea?.value ?? "";
-      renderUI(results);
-      const newTextarea = document.getElementById("vin-input") as HTMLTextAreaElement | null;
-      if (newTextarea) newTextarea.value = savedText;
+    // ── Wire mode buttons ──
+    document.getElementById("mode-vin")?.addEventListener("click", () => {
+      if (currentMode !== "vin-list") { currentMode = "vin-list"; render(); }
     });
+    document.getElementById("mode-dealer")?.addEventListener("click", () => {
+      if (currentMode !== "dealer-stock") { currentMode = "dealer-stock"; render(); }
+    });
+
+    // ── Wire VIN checker ──
+    if (currentMode === "vin-list") {
+      const btn = document.getElementById("vin-check-btn") as HTMLButtonElement;
+      const textarea = document.getElementById("vin-input") as HTMLTextAreaElement;
+      const zipInput = document.getElementById("vin-zip-input") as HTMLInputElement;
+      const status = document.getElementById("vin-status") as HTMLSpanElement;
+      if (textarea && savedVinText) textarea.value = savedVinText;
+      if (zipInput && savedZip) zipInput.value = savedZip;
+
+      btn?.addEventListener("click", async () => {
+        const raw = textarea?.value ?? "";
+        savedVinText = raw;
+        savedZip = zipInput?.value?.trim() || "";
+        const zip = savedZip || "75201";
+        const vins = raw.split("\n").map(v => v.trim()).filter(v => v.length > 0).slice(0, 10);
+        if (!vins.length) { if (status) status.textContent = "Please enter at least one VIN."; return; }
+        if (status) status.textContent = `Checking ${vins.length} VIN${vins.length > 1 ? "s" : ""}... (~3 API calls per VIN)`;
+        btn.disabled = true; btn.style.opacity = "0.6";
+
+        try {
+          vinResults = await checkVinsLive(vins, zip);
+        } catch {
+          vinResults = getMockVinResults(vins);
+        }
+        render();
+      });
+    }
+
+    // ── Wire dealer stock form ──
+    if (currentMode === "dealer-stock") {
+      const idInput = document.getElementById("dealer-id-input") as HTMLInputElement;
+      const domainInput = document.getElementById("dealer-domain-input") as HTMLInputElement;
+      const conditionSelect = document.getElementById("dealer-condition") as HTMLSelectElement;
+      const rowsSelect = document.getElementById("dealer-rows") as HTMLSelectElement;
+      const loadBtn = document.getElementById("dealer-load-btn") as HTMLButtonElement;
+      const statusEl = document.getElementById("dealer-status") as HTMLDivElement;
+
+      // Restore saved value into the right field
+      if (savedDealerInput) {
+        if (/^\d+$/.test(savedDealerInput)) { if (idInput) idInput.value = savedDealerInput; }
+        else { if (domainInput) domainInput.value = savedDealerInput; }
+      }
+      if (conditionSelect && savedCondition) conditionSelect.value = savedCondition;
+      if (rowsSelect && savedRows) rowsSelect.value = savedRows;
+
+      const doLoad = async () => {
+        const val = idInput?.value?.trim() || domainInput?.value?.trim();
+        if (!val) { if (statusEl) statusEl.textContent = "Please enter a Dealer ID or domain."; return; }
+        savedDealerInput = val;
+        savedCondition = conditionSelect?.value || "";
+        savedRows = rowsSelect?.value || "50";
+        const rows = parseInt(savedRows, 10);
+        if (statusEl) statusEl.innerHTML = '<span style="color:#60a5fa">Loading inventory + regional sold data...</span>';
+        if (loadBtn) { loadBtn.disabled = true; loadBtn.style.opacity = "0.6"; }
+
+        try {
+          const resp = await fetchDealerInventory(val, savedCondition || undefined, rows);
+          if (!resp?.listings?.length) {
+            if (statusEl) statusEl.innerHTML = '<span style="color:#fca5a5">No listings found. Check the Dealer ID or domain.</span>';
+            if (loadBtn) { loadBtn.disabled = false; loadBtn.style.opacity = "1"; }
+            return;
+          }
+          const listings = resp.listings;
+          const numFound = resp.num_found || listings.length;
+          const dName = listings[0]?.dealer?.name || val;
+          // Use stats from API response (stats.dom.avg) for accurate avg DOM
+          const domStats = resp.stats?.dom;
+          const priceStats = resp.stats?.price;
+          const milesStats = resp.stats?.miles;
+          const avgPrice = Math.round(priceStats?.avg || 0);
+          const avgMiles = Math.round(milesStats?.avg || 0);
+          const avgDom = Math.round(domStats?.avg || 0);
+
+          // Fetch regional sold data for fast/slow mover analysis
+          const dealerState = listings[0]?.dealer?.state || listings[0]?.location?.state || "TX";
+          if (statusEl) statusEl.innerHTML = '<span style="color:#60a5fa">Loading regional sold data for ' + dealerState + '...</span>';
+          let soldData = null;
+          try { soldData = await fetchSoldSummary(dealerState); } catch {}
+
+          dealerResult = { listings, numFound, dealerName: dName, stats: { avgPrice, avgMiles, avgDom }, soldData };
+          render();
+        } catch (e: any) {
+          if (statusEl) statusEl.innerHTML = `<span style="color:#fca5a5">Error: ${e.message || "Failed to fetch inventory"}</span>`;
+          if (loadBtn) { loadBtn.disabled = false; loadBtn.style.opacity = "1"; }
+        }
+      };
+
+      loadBtn?.addEventListener("click", doLoad);
+      idInput?.addEventListener("keydown", (e) => { if (e.key === "Enter") doLoad(); });
+      domainInput?.addEventListener("keydown", (e) => { if (e.key === "Enter") doLoad(); });
+    }
   }
 
-  renderUI();
+  // ── Render immediately — no data pre-loaded ──
+  render();
 }
 
 main();

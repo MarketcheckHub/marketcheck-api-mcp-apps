@@ -20,19 +20,19 @@
   <!-- Open Graph -->
   <meta property="og:type" content="article">
   <meta property="og:title" content="How to Build: VIN Market Report — MarketCheck Apps">
-  <meta property="og:description" content="Generates a comprehensive VIN-level market report including vehicle specs, predicted fair market price (retail and wholesale), listing history timeline, active comparable listings, recently sold compa">
+  <meta property="og:description" content="The VIN Market Report is a comprehensive, single-page vehicle market intelligence report. Enter a VIN and get an instant analysis covering: vehicle specs decoded from the VIN, ML-predicted fair market">
   <meta property="og:url" content="https://apps.marketcheck.com/app/vin-market-report/">
   <meta property="og:image" content="https://apps.marketcheck.com/assets/screenshots/vin-market-report.png">
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="How to Build: VIN Market Report">
-  <meta name="twitter:description" content="Generates a comprehensive VIN-level market report including vehicle specs, predicted fair market price (retail and wholesale), listing history timeline, active comparable listings, recently sold compa">
+  <meta name="twitter:description" content="The VIN Market Report is a comprehensive, single-page vehicle market intelligence report. Enter a VIN and get an instant analysis covering: vehicle specs decoded from the VIN, ML-predicted fair market">
   <meta name="twitter:image" content="https://apps.marketcheck.com/assets/screenshots/vin-market-report.png">
 
   <!-- Structured Data -->
   <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"TechArticle","name":"How to Build: VIN Market Report","description":"Generates a comprehensive VIN-level market report including vehicle specs, predicted fair market price (retail and wholesale), listing history timeline, active comparable listings, recently sold comparables, sold volume summary, and applicable OEM incentives for newer vehicles. Think of it as a CarStory.ai-style embeddable widget.","url":"https://apps.marketcheck.com/app/vin-market-report/","image":"https://apps.marketcheck.com/assets/screenshots/vin-market-report.png","author":{"@type":"Organization","name":"MarketCheck","url":"https://www.marketcheck.com"}}
+  {"@context":"https://schema.org","@type":"TechArticle","name":"How to Build: VIN Market Report","description":"The VIN Market Report is a comprehensive, single-page vehicle market intelligence report. Enter a VIN and get an instant analysis covering: vehicle specs decoded from the VIN, ML-predicted fair market value (franchise and independent dealer prices), deal score gauge (Great Deal to Overpriced), market position among comparable vehicles (price/miles/DOM percentiles with cluster visualization), price history timeline across dealers, active and sold comparable listings, depreciation story with 1-year projection, market trend indicators, and applicable OEM incentives for recent models. Designed as an embeddable widget (like CarStory.ai) with full standalone, iframe, and MCP support. Report history is stored in the browser session — users can re-run any previous report with one click.","url":"https://apps.marketcheck.com/app/vin-market-report/","image":"https://apps.marketcheck.com/assets/screenshots/vin-market-report.png","author":{"@type":"Organization","name":"MarketCheck","url":"https://www.marketcheck.com"}}
   </script>
 
   <style>
@@ -309,7 +309,57 @@ pre.code-block {
   <!-- What This App Does -->
   <div class="section">
     <h2>What This App Does</h2>
-    <p>Generates a comprehensive VIN-level market report including vehicle specs, predicted fair market price (retail and wholesale), listing history timeline, active comparable listings, recently sold comparables, sold volume summary, and applicable OEM incentives for newer vehicles. Think of it as a CarStory.ai-style embeddable widget.</p>
+    <p>The VIN Market Report is a comprehensive, single-page vehicle market intelligence report. Enter a VIN and get an instant analysis covering: vehicle specs decoded from the VIN, ML-predicted fair market value (franchise and independent dealer prices), deal score gauge (Great Deal to Overpriced), market position among comparable vehicles (price/miles/DOM percentiles with cluster visualization), price history timeline across dealers, active and sold comparable listings, depreciation story with 1-year projection, market trend indicators, and applicable OEM incentives for recent models. Designed as an embeddable widget (like CarStory.ai) with full standalone, iframe, and MCP support. Report history is stored in the browser session — users can re-run any previous report with one click.</p>
+  </div>
+
+  <!-- Who Can Use This -->
+  <div class="section">
+    <h2>Who Can Use This</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Car Shoppers</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Paste a VIN from any listing to see if it's a good deal — get a Buy/Negotiate/Pass score backed by ML predictions and real comparable data.</div>
+      </div><div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Dealer Websites</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Embed as a widget on your VDP (vehicle detail page) to build buyer trust with transparent market data. Supports iframe embed and compact mode.</div>
+      </div><div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Auto Lenders</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Validate collateral value with franchise and independent dealer FMV predictions, confidence ranges, and comparable evidence.</div>
+      </div><div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Insurance Adjusters</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Use for pre-loss valuation — the report provides market position, comparable sales, and price history needed for settlement documentation.</div>
+      </div><div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Appraisers</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Desktop appraisal in seconds — dual-tier pricing, active and sold comps, depreciation trajectory, and full listing history.</div>
+      </div><div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Auto Media / Content</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Generate market reports for editorial content — the report includes quotable stats, trend data, and shareable visualizations.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- URL Parameters -->
+  <div class="section">
+    <h2>URL Parameters</h2>
+    <p>Pass parameters directly in the URL to pre-fill the form and auto-generate the report:</p>
+    <table class="param-table">
+      <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>api_key</code></td><td>Your MarketCheck API key (or set via localStorage)</td></tr><tr><td><code>vin</code></td><td>17-character VIN — auto-fills the form and triggers report generation</td></tr><tr><td><code>price</code></td><td>Asking price — also accepts askingPrice, asking_price</td></tr><tr><td><code>miles</code></td><td>Current mileage — also accepts mileage</td></tr><tr><td><code>zip</code></td><td>ZIP code for local comps — also accepts zipcode, zip_code</td></tr><tr><td><code>compact</code></td><td>Set to 'true' for a narrow 400px widget mode (for iframes)</td></tr><tr><td><code>embed</code></td><td>Set to 'true' for embedded mode (hides settings gear)</td></tr>
+      </tbody>
+    </table>
+    <h3>URL Examples</h3>
+    <pre class="code-block"># Basic — auto-generate a report for a VIN
+https://apps.marketcheck.com/apps/vin-market-report/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658
+
+# Full — with asking price, mileage, and ZIP for deal scoring
+https://apps.marketcheck.com/apps/vin-market-report/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;price=25000&amp;miles=35000&amp;zip=90044
+
+# Compact widget — for iframe embeds (400px width)
+https://apps.marketcheck.com/apps/vin-market-report/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;compact=true&amp;embed=true
+
+# Using aliases
+https://apps.marketcheck.com/apps/vin-market-report/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;askingPrice=25000&amp;mileage=35000&amp;zipcode=90044</pre>
   </div>
 
   <!-- Screenshot -->
@@ -330,7 +380,7 @@ pre.code-block {
             <div class="flow-api-method">GET</div>
             <code class="flow-api-path">/v2/decode/car/neovin/{vin}/specs</code>
             <div class="flow-api-name">VIN Decode</div>
-          </div></div><div class="flow-note">Get year, make, model to drive subsequent searches</div></div><div class="flow-arrow">&#8595;</div><div class="flow-step"><div class="flow-step-header"><div class="flow-step-num">2</div><div class="flow-step-label">Price + History</div><span class="flow-parallel-badge">PARALLEL</span></div><div class="flow-api-cards flow-parallel">
+          </div></div><div class="flow-note">Get year, make, model, trim, engine, transmission, drivetrain, MSRP — needed to drive all subsequent searches</div></div><div class="flow-arrow">&#8595;</div><div class="flow-step"><div class="flow-step-header"><div class="flow-step-num">2</div><div class="flow-step-label">Price + History</div><span class="flow-parallel-badge">PARALLEL</span></div><div class="flow-api-cards flow-parallel">
           <div class="flow-api-card">
             <div class="flow-api-method">GET</div>
             <code class="flow-api-path">/v2/predict/car/us/marketcheck_price/comparables</code>
@@ -345,7 +395,7 @@ pre.code-block {
             <div class="flow-api-method">GET</div>
             <code class="flow-api-path">/v2/history/car/{vin}</code>
             <div class="flow-api-name">Car History (Listing Timeline)</div>
-          </div></div><div class="flow-parallel-line"></div><div class="flow-note">Fetch retail price, wholesale price, and listing history in parallel</div></div><div class="flow-arrow">&#8595;</div><div class="flow-step"><div class="flow-step-header"><div class="flow-step-num">3</div><div class="flow-step-label">Comparables + Market</div><span class="flow-parallel-badge">PARALLEL</span></div><div class="flow-api-cards flow-parallel">
+          </div></div><div class="flow-parallel-line"></div><div class="flow-note">Three parallel calls: franchise dealer FMV prediction, independent dealer FMV prediction, and full listing history (dealer hops, price changes over time)</div></div><div class="flow-arrow">&#8595;</div><div class="flow-step"><div class="flow-step-header"><div class="flow-step-num">3</div><div class="flow-step-label">Comparables + Market</div><span class="flow-parallel-badge">PARALLEL</span></div><div class="flow-api-cards flow-parallel">
           <div class="flow-api-card">
             <div class="flow-api-method">GET</div>
             <code class="flow-api-path">/v2/search/car/active</code>
@@ -360,12 +410,12 @@ pre.code-block {
             <div class="flow-api-method">GET</div><span class="enterprise-badge">Enterprise API</span>
             <code class="flow-api-path">/api/v1/sold-vehicles/summary</code>
             <div class="flow-api-name">Sold Vehicle Summary (Market Intelligence)</div>
-          </div></div><div class="flow-parallel-line"></div><div class="flow-note">Use decoded make/model to search active comps, sold comps, and sold volume</div></div><div class="flow-arrow">&#8595;</div><div class="flow-step"><div class="flow-step-header"><div class="flow-step-num">4</div><div class="flow-step-label">Incentives (conditional)</div><span class="flow-sequential-badge">SEQUENTIAL</span></div><div class="flow-api-cards flow-sequential">
+          </div></div><div class="flow-parallel-line"></div><div class="flow-note">Three parallel calls: active comparable listings (year ±1, 100mi radius, with price/miles/DOM stats), recently sold comparables, and sold volume summary for market context</div></div><div class="flow-arrow">&#8595;</div><div class="flow-step"><div class="flow-step-header"><div class="flow-step-num">4</div><div class="flow-step-label">Incentives (conditional)</div><span class="flow-sequential-badge">SEQUENTIAL</span></div><div class="flow-api-cards flow-sequential">
           <div class="flow-api-card">
             <div class="flow-api-method">GET</div>
             <code class="flow-api-path">/v2/search/car/incentive/oem</code>
             <div class="flow-api-name">OEM Incentives</div>
-          </div></div><div class="flow-note">Only for vehicles within 1 year of current — fetch applicable OEM incentives</div></div>
+          </div></div><div class="flow-note">Only for vehicles within 1 model year of current — fetch cash back, APR, and lease specials from the OEM</div></div>
     </div>
   </div>
 
@@ -530,7 +580,7 @@ pre.code-block {
     <h2>What to Render</h2>
     <p>Once you have the API responses, build these UI components:</p>
     <div class="renders-list">
-      <div class="render-item"><div class="render-dot"></div>Deal score gauge</div><div class="render-item"><div class="render-dot"></div>price prediction with confidence band</div><div class="render-item"><div class="render-dot"></div>price vs comparables chart</div><div class="render-item"><div class="render-dot"></div>listing history timeline</div><div class="render-item"><div class="render-dot"></div>comparable vehicles carousel</div><div class="render-item"><div class="render-dot"></div>sold market summary</div><div class="render-item"><div class="render-dot"></div>incentive badges (if applicable)</div>
+      <div class="render-item"><div class="render-dot"></div>Deal score gauge (Great Deal → Overpriced)</div><div class="render-item"><div class="render-dot"></div>vehicle spec card (decoded from VIN)</div><div class="render-item"><div class="render-dot"></div>market position with 3 range bars (price/miles/DOM percentiles)</div><div class="render-item"><div class="render-dot"></div>ML price prediction with confidence band (franchise + independent)</div><div class="render-item"><div class="render-dot"></div>comparable cluster strips (dot distribution showing where this vehicle lands)</div><div class="render-item"><div class="render-dot"></div>active comparables carousel with VDP links</div><div class="render-item"><div class="render-dot"></div>recently sold comparables table</div><div class="render-item"><div class="render-dot"></div>price history timeline chart (auto-spaced labels for cluttered data)</div><div class="render-item"><div class="render-dot"></div>depreciation story with total loss/appreciation and 1-year projection</div><div class="render-item"><div class="render-dot"></div>market trend sparkline</div><div class="render-item"><div class="render-dot"></div>OEM incentive badges</div><div class="render-item"><div class="render-dot"></div>report history sidebar (sessionStorage / max 1000)</div>
     </div>
   </div>
 

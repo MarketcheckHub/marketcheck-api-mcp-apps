@@ -1,8 +1,9 @@
 /**
  * Helper to register an MCP App tool + resource pair.
- * Gracefully handles SDK schema validation errors.
+ * Converts JSON Schema inputSchema to Zod schemas for MCP SDK compatibility.
  */
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -11,6 +12,56 @@ try {
   extApps = await import("@modelcontextprotocol/ext-apps/server");
 } catch {
   console.warn("  ext-apps/server not available — MCP App registration disabled");
+}
+
+/**
+ * Convert a JSON Schema properties object to a Zod shape.
+ * Handles: string, number, integer, boolean, array (of strings), enums.
+ */
+function jsonSchemaToZod(
+  properties: Record<string, any>,
+  required: string[] = [],
+): Record<string, z.ZodTypeAny> {
+  const shape: Record<string, z.ZodTypeAny> = {};
+
+  for (const [key, prop] of Object.entries(properties)) {
+    let field: z.ZodTypeAny;
+    const desc = prop.description || undefined;
+
+    switch (prop.type) {
+      case "number":
+      case "integer":
+        field = z.number();
+        if (desc) field = field.describe(desc);
+        break;
+      case "boolean":
+        field = z.boolean();
+        if (desc) field = field.describe(desc);
+        break;
+      case "array":
+        field = z.array(z.string());
+        if (desc) field = field.describe(desc);
+        break;
+      case "string":
+      default:
+        if (prop.enum) {
+          field = z.enum(prop.enum as [string, ...string[]]);
+        } else {
+          field = z.string();
+        }
+        if (desc) field = field.describe(desc);
+        if (prop.default !== undefined) field = field.default(prop.default);
+        break;
+    }
+
+    if (!required.includes(key)) {
+      field = field.optional();
+    }
+
+    shape[key] = field;
+  }
+
+  return shape;
 }
 
 interface AppRegistration {
@@ -36,6 +87,11 @@ export function registerApp({
 
   const resourceUri = `ui://marketcheck/${htmlFileName}`;
 
+  // Convert JSON Schema to Zod
+  const properties = (inputSchema as any).properties ?? {};
+  const required = (inputSchema as any).required ?? [];
+  const zodShape = jsonSchemaToZod(properties, required);
+
   try {
     extApps.registerAppTool(
       server,
@@ -43,7 +99,7 @@ export function registerApp({
       {
         title,
         description,
-        inputSchema,
+        inputSchema: zodShape,
         _meta: { ui: { resourceUri } },
       },
       handler,
@@ -71,7 +127,6 @@ export function registerApp({
       },
     );
   } catch (e: any) {
-    // Silently skip — MCP tool registration failed but server continues
     throw e; // Re-throw so caller's try-catch can log it
   }
 }

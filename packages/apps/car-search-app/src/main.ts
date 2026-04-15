@@ -36,6 +36,13 @@ interface CarListing {
   predicted_price?: number;
   is_cpo?: boolean;
   photo_url?: string;
+  photo_urls: string[];
+  options: string[];
+  features: string[];
+  seller_comments: string;
+  cylinders: number;
+  engine_size: string;
+  msrp: number;
 }
 
 interface SearchFilters {
@@ -47,6 +54,8 @@ interface SearchFilters {
   body_type?: string;
   fuel_type?: string;
   drivetrain?: string;
+  exterior_color?: string;
+  interior_color?: string;
   zip?: string;
   radius?: string;
   sort_by?: string;
@@ -94,6 +103,8 @@ const MODELS_BY_MAKE: Record<string, string[]> = {
 const BODY_TYPES  = ["Sedan","SUV","Truck","Coupe","Van","Hatchback","Convertible","Wagon"];
 const FUEL_TYPES  = ["Gas","Hybrid","Electric","Diesel"];
 const DRIVETRAINS = ["AWD","FWD","RWD","4WD"];
+const EXTERIOR_COLORS = ["Black","White","Silver","Gray","Red","Blue","Green","Brown","Gold","Orange","Yellow","Purple"];
+const INTERIOR_COLORS = ["Black","Gray","Brown","Beige","White","Red","Blue"];
 
 const BODY_COLORS: Record<string,string> = {
   Sedan:"#3b82f6", SUV:"#10b981", Truck:"#f59e0b", Coupe:"#ef4444",
@@ -155,7 +166,7 @@ const MOCK: CarListing[] = [
   {id:"m18",vin:"5GAEVCKW0MJ000018",heading:"2023 GMC Yukon Denali",year:2023,make:"GMC",model:"Yukon",trim:"Denali",body_type:"SUV",fuel_type:"Gas",drivetrain:"4WD",transmission:"10-Speed Auto",engine:"6.2L V8",exterior_color:"Onyx Black",interior_color:"Teak/Light Shale",price:72500,miles:19400,city:"Houston",state:"TX",zip:"77001",dealer_name:"Gulf Coast GMC",vdp_url:"https://example.com/v18",dom:16,first_seen:"2026-03-10",city_mpg:14,highway_mpg:19,doors:4,is_cpo:true},
   {id:"m19",vin:"SALAG2V64PA000019",heading:"2023 Land Rover Defender 110 S",year:2023,make:"Land Rover",model:"Defender",trim:"110 S",body_type:"SUV",fuel_type:"Gas",drivetrain:"AWD",transmission:"8-Speed Auto",engine:"3.0L I6 Turbo",exterior_color:"Fuji White",interior_color:"Ebony",price:58900,miles:15600,city:"Denver",state:"CO",zip:"80202",dealer_name:"Mountain Range Rover",vdp_url:"https://example.com/v19",dom:13,first_seen:"2026-03-13",city_mpg:18,highway_mpg:21,doors:4,predicted_price:59800},
   {id:"m20",vin:"YV4A22RL6P1000020",heading:"2024 Volvo XC60 B5 Plus",year:2024,make:"Volvo",model:"XC60",trim:"B5 Plus",body_type:"SUV",fuel_type:"Hybrid",drivetrain:"AWD",transmission:"8-Speed Auto",engine:"2.0L I4 Turbo Mild-Hybrid",exterior_color:"Crystal White",interior_color:"Charcoal",price:47800,miles:9100,city:"Philadelphia",state:"PA",zip:"19101",dealer_name:"Main Line Volvo",vdp_url:"https://example.com/v20",dom:10,first_seen:"2026-03-16",city_mpg:26,highway_mpg:33,doors:4,is_cpo:true},
-];
+].map(c=>({...c,photo_urls:[],options:["Bluetooth","Backup Camera","Keyless Entry","Alloy Wheels"],features:["Apple CarPlay","Android Auto"],seller_comments:"",cylinders:4,engine_size:"2.0L",msrp:0} as CarListing));
 
 // ─── Application State ──────────────────────────────────────────
 
@@ -171,6 +182,8 @@ const S = {
   statsOpen: false,
   mock: true,
   filters: { rows: 24, start: 0 } as SearchFilters,
+  _lastNlp: "" as string,
+  _detailPhotoIdx: 0,
 };
 
 // ─── API Layer ───────────────────────────────────────────────────
@@ -183,6 +196,18 @@ function apiKey(): string|null {
 async function apiSearch(args: Record<string,any>): Promise<any> {
   const k = apiKey();
   if (!k) return null;
+  // Direct API call to MarketCheck (no proxy)
+  try {
+    const url = new URL("https://api.marketcheck.com/v2/search/car/active");
+    url.searchParams.set("api_key", k);
+    const directArgs = {...args, stats:"price,miles", facets:"make,model,trim,body_type", include_dealer_object:true, include_build_object:true, fetch_all_photos:true};
+    for (const [key, val] of Object.entries(directArgs)) {
+      if (val !== undefined && val !== null && val !== "") url.searchParams.set(key, String(val));
+    }
+    const r = await fetch(url.toString());
+    if (r.ok) return r.json();
+  } catch(e) { console.error("Direct API error, trying proxy:", e); }
+  // Proxy fallback
   try {
     const r = await fetch("/api/proxy/search-cars", {
       method: "POST",
@@ -190,7 +215,7 @@ async function apiSearch(args: Record<string,any>): Promise<any> {
       body: JSON.stringify({...args, _auth_mode:"api_key", _auth_value:k}),
     });
     if (r.ok) return r.json();
-  } catch(e) { console.error("API error:",e); }
+  } catch(e) { console.error("Proxy error:",e); }
   return null;
 }
 
@@ -199,37 +224,74 @@ function buildParams(): Record<string,any> {
   if (f.make) p.make = f.make;
   if (f.model) p.model = f.model;
   if (f.year_range) p.year = f.year_range;
-  if (f.price_range) p.price = f.price_range;
-  if (f.miles_range) p.miles = f.miles_range;
+  if (f.price_range) p.price_range = f.price_range;
+  if (f.miles_range) p.miles_range = f.miles_range;
   if (f.body_type) p.body_type = f.body_type;
   if (f.fuel_type) p.fuel_type = f.fuel_type;
   if (f.drivetrain) p.drivetrain = f.drivetrain;
+  if (f.exterior_color) p.exterior_color = f.exterior_color;
+  if (f.interior_color) p.interior_color = f.interior_color;
   if (f.zip) p.zip = f.zip;
   if (f.radius) p.radius = f.radius;
   if (f.sort_by) {
-    const m: Record<string,string> = {price_asc:"price:asc",price_desc:"price:desc",miles_asc:"miles:asc",dom_asc:"dom:asc",deal:"deal_score:desc"};
-    p.sort_by = m[f.sort_by] || "price:asc";
+    const sortMap: Record<string, { by: string; order: string }> = {
+      price_asc:  { by: "price", order: "asc" },
+      price_desc: { by: "price", order: "desc" },
+      miles_asc:  { by: "miles", order: "asc" },
+      dom_asc:    { by: "dom", order: "asc" },
+      deal:       { by: "price", order: "asc" },
+    };
+    const s = sortMap[f.sort_by] ?? { by: "price", order: "asc" };
+    p.sort_by = s.by;
+    p.sort_order = s.order;
   }
   p.rows = f.rows; p.start = f.start;
   return p;
 }
 
 function mapItem(i: any): CarListing {
+  // MarketCheck API nests vehicle specs under `build` object; also check flat fields as fallback
+  const b = i.build || {};
+  const photos: string[] = i.media?.photo_links || [];
+  // Options/features may come as arrays or comma-separated strings
+  const parseList = (v: any): string[] => {
+    if (Array.isArray(v)) return v.filter(Boolean);
+    if (typeof v === "string" && v) return v.split(",").map((s: string) => s.trim()).filter(Boolean);
+    return [];
+  };
   return {
     id:i.id||i.vin||Math.random().toString(36).slice(2),
     vin:i.vin||"", heading:i.heading||`${i.year} ${i.make} ${i.model} ${i.trim||""}`.trim(),
     year:i.year||0, make:i.make||"", model:i.model||"", trim:i.trim||"",
-    body_type:i.body_type||"", fuel_type:i.fuel_type||"", drivetrain:i.drivetrain||"",
-    transmission:i.transmission||"", engine:i.engine||"",
-    exterior_color:i.exterior_color||"", interior_color:i.interior_color||"",
-    price:i.price||0, miles:i.miles||0,
-    city:i.city||i.dealer?.city||"", state:i.state||i.dealer?.state||"",
-    zip:i.zip||i.dealer?.zip||"", dealer_name:i.dealer_name||i.dealer?.name||"",
-    vdp_url:i.vdp_url||"", dom:i.dom||0,
-    first_seen:i.first_seen_date||i.first_seen||"",
-    city_mpg:i.city_mpg||0, highway_mpg:i.highway_mpg||0, doors:i.doors||4,
-    predicted_price:i.predicted_price||undefined, is_cpo:i.is_cpo||false,
-    photo_url:i.media?.photo_links?.[0]||i.photo_url||undefined,
+    body_type:i.body_type||b.body_type||"",
+    fuel_type:i.fuel_type||b.fuel_type||"",
+    drivetrain:i.drivetrain||b.drivetrain||"",
+    transmission:i.transmission||b.transmission||"",
+    engine:i.engine||b.engine||b.engine_type||[b.engine_size, b.engine_block, b.engine_aspiration].filter(Boolean).join(" ")||"",
+    exterior_color:i.exterior_color||b.exterior_color||"",
+    interior_color:i.interior_color||b.interior_color||"",
+    price:i.price||0,
+    miles:i.miles||i.ref_miles||i.mileage||0,
+    city:i.city||i.dealer?.city||i.location?.city||"",
+    state:i.state||i.dealer?.state||i.location?.state||"",
+    zip:i.zip||i.dealer?.zip||i.location?.zip||"",
+    dealer_name:i.dealer_name||i.dealer?.name||"",
+    vdp_url:i.vdp_url||"",
+    dom:i.dom||i.days_on_market||i.dom_180||i.dom_active||0,
+    first_seen:i.first_seen_date||i.first_seen||i.first_seen_at_source||i.first_seen_at||"",
+    city_mpg:i.city_mpg||b.city_mpg||0,
+    highway_mpg:i.highway_mpg||b.highway_mpg||0,
+    doors:i.doors||b.doors||0,
+    predicted_price:i.predicted_price||undefined,
+    is_cpo:i.is_cpo||i.is_certified||false,
+    photo_url:photos[0]||i.photo_url||undefined,
+    photo_urls:photos,
+    options:parseList(i.options_packages||i.options||b.standard_specs),
+    features:parseList(i.high_value_features||i.features||b.made_in),
+    seller_comments:i.seller_comments||i.description||i.dealer_comment||"",
+    cylinders:i.cylinders||b.cylinders||0,
+    engine_size:i.engine_size||b.engine_size||"",
+    msrp:i.msrp||b.msrp||0,
   };
 }
 
@@ -275,6 +337,8 @@ function filterLocal(): CarListing[] {
   if (f.body_type) { const ts = f.body_type.split(",").map(t=>t.toLowerCase()); d = d.filter(c=>ts.includes(c.body_type.toLowerCase())); }
   if (f.fuel_type) { const ts = f.fuel_type.split(",").map(t=>t.toLowerCase()); d = d.filter(c=>ts.includes(c.fuel_type.toLowerCase())); }
   if (f.drivetrain) { const ts = f.drivetrain.split(",").map(t=>t.toLowerCase()); d = d.filter(c=>ts.includes(c.drivetrain.toLowerCase())); }
+  if (f.exterior_color) { const ts = f.exterior_color.split(",").map(t=>t.toLowerCase()); d = d.filter(c=>ts.some(t=>c.exterior_color.toLowerCase().includes(t))); }
+  if (f.interior_color) { const ts = f.interior_color.split(",").map(t=>t.toLowerCase()); d = d.filter(c=>ts.some(t=>c.interior_color.toLowerCase().includes(t))); }
   if (f.sort_by) {
     switch(f.sort_by) {
       case "price_asc":  d.sort((a,b)=>a.price-b.price); break;
@@ -337,6 +401,24 @@ function parseNlp(q: string): Partial<SearchFilters> {
   else if (s.includes("fwd")||s.includes("front-wheel")) p.drivetrain = "FWD";
   else if (s.includes("rwd")||s.includes("rear-wheel")) p.drivetrain = "RWD";
 
+  // Color detection — check for "red interior", "black exterior", or just color names (default to exterior)
+  const colorNames = ["black","white","silver","gray","grey","red","blue","green","brown","gold","orange","yellow","purple","beige"];
+  const intMatch = s.match(new RegExp(`(${colorNames.join("|")})\\s+interior`));
+  const extMatch = s.match(new RegExp(`(${colorNames.join("|")})\\s+(?:exterior|paint|color)`));
+  // Also check for standalone "red car", "blue SUV" etc. or just a color keyword
+  if (intMatch) p.interior_color = intMatch[1].charAt(0).toUpperCase() + intMatch[1].slice(1);
+  if (extMatch) p.exterior_color = extMatch[1].charAt(0).toUpperCase() + extMatch[1].slice(1);
+  // If neither explicit pattern matched, look for color words not already captured
+  if (!intMatch && !extMatch) {
+    for (const c of colorNames) {
+      if (s.includes(c)) {
+        const normalized = c === "grey" ? "Gray" : c.charAt(0).toUpperCase() + c.slice(1);
+        p.exterior_color = normalized;
+        break;
+      }
+    }
+  }
+
   const zm = s.match(/(?:near|in|around)\s+(\d{5})/);
   if (zm) { p.zip = zm[1]; p.radius = "50"; }
 
@@ -355,7 +437,7 @@ function badges(c: CarListing): {t:string,c:string}[] {
   const b: {t:string,c:string}[] = [];
   if (c.predicted_price && c.price < c.predicted_price*0.95) b.push({t:"Great Deal",c:"#16a34a"});
   if (c.is_cpo) b.push({t:"CPO",c:"#2563eb"});
-  if (c.miles < 15000) b.push({t:"Low Miles",c:"#7c3aed"});
+  if (c.miles > 0 && c.miles < 15000) b.push({t:"Low Miles",c:"#7c3aed"});
   if (c.dom <= 3) b.push({t:"New Arrival",c:"#ea580c"});
   return b;
 }
@@ -377,6 +459,8 @@ function activeTags(): {key:string,label:string}[] {
   if (f.body_type)  t.push({key:"body_type",label:f.body_type});
   if (f.fuel_type)  t.push({key:"fuel_type",label:f.fuel_type});
   if (f.drivetrain) t.push({key:"drivetrain",label:f.drivetrain});
+  if (f.exterior_color) t.push({key:"exterior_color",label:`Ext: ${f.exterior_color}`});
+  if (f.interior_color) t.push({key:"interior_color",label:`Int: ${f.interior_color}`});
   if (f.zip) t.push({key:"zip",label:`ZIP: ${f.zip} (${f.radius||50}mi)`});
   return t;
 }
@@ -455,7 +539,7 @@ html,body{font-family:var(--ff);background:var(--bg1);color:var(--t1);line-heigh
 .ch{padding:6px 12px;border-radius:20px;border:1px solid var(--bc);background:var(--bg1);color:var(--t2);font-size:12px;font-weight:500;cursor:pointer;transition:all var(--tr);user-select:none}
 .ch:hover{border-color:var(--ac);color:var(--ac)}
 .ch.on{background:var(--acL);border-color:var(--ac);color:var(--ac);font-weight:600}
-.fa{display:flex;gap:10px;padding-top:6px}
+.fa{display:flex;gap:10px;padding-top:10px;position:sticky;bottom:0;background:var(--bg2);z-index:5;padding-bottom:6px;border-top:1px solid var(--bc);margin-top:8px}
 .bsrch{flex:1;padding:11px 20px;background:var(--ac);color:#fff;border:none;border-radius:var(--rs);font-size:14px;font-weight:600;cursor:pointer;transition:background var(--tr);min-height:44px}
 .bsrch:hover{background:var(--acH)}
 .brst{padding:11px 16px;background:transparent;color:var(--tm);border:1px solid var(--bc);border-radius:var(--rs);font-size:13px;cursor:pointer;transition:all var(--tr);min-height:44px}
@@ -498,7 +582,7 @@ html,body{font-family:var(--ff);background:var(--bg1);color:var(--t1);line-heigh
 .cpm{font-size:22px;font-weight:800;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:2px}
 .cbs{position:absolute;top:10px;left:10px;display:flex;gap:4px;flex-wrap:wrap}
 .bdg{padding:3px 8px;border-radius:4px;font-size:10px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:.3px}
-.cdm{position:absolute;bottom:8px;right:10px;font-size:10px;color:var(--tm);background:var(--bg2);padding:2px 7px;border-radius:10px}
+.cdm{position:absolute;bottom:8px;right:10px;font-size:11px;color:var(--t1);background:var(--bg1);padding:3px 8px;border-radius:10px;font-weight:600;border:1px solid var(--bc);opacity:0.95}
 .cby{padding:14px 16px 16px}
 .ctt{font-size:16px;font-weight:700;color:var(--t1);margin-bottom:4px;line-height:1.3}
 .cpr{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
@@ -523,6 +607,11 @@ html,body{font-family:var(--ff);background:var(--bg1);color:var(--t1);line-heigh
 .blm:hover{background:var(--ac);color:#fff}
 
 /* detail */
+.dv-wrap{max-width:1200px;margin:0 auto;padding:20px}.dv-inner{max-width:70%;margin:0 auto}
+.carousel-wrap{width:100%}.carousel-main{width:100%;height:400px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;background:var(--bg3)}.carousel-main img{max-width:100%;max-height:100%;object-fit:contain}.car-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(0,0,0,0.5);color:#fff;border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2;transition:background 0.2s}.car-nav:hover{background:rgba(0,0,0,0.8)}.car-nav svg{width:20px;height:20px}.car-prev{left:12px}.car-next{right:12px}.car-count{position:absolute;bottom:12px;right:12px;background:rgba(0,0,0,0.6);color:#fff;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600}
+.carousel-thumbs{display:flex;gap:6px;padding:10px;overflow-x:auto;background:var(--bg2)}.car-thumb{width:64px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;opacity:0.6;transition:all 0.2s}.car-thumb:hover{opacity:1}.car-thumb.active{border-color:var(--ac);opacity:1}
+.opt-grid{display:flex;flex-wrap:wrap;gap:8px}.opt-tag{padding:6px 12px;background:var(--bg3);border:1px solid var(--bc);border-radius:20px;font-size:13px;color:var(--t2)}.feat-tag{padding:6px 12px;background:var(--ac)15;border:1px solid var(--ac)33;border-radius:20px;font-size:13px;color:var(--ac);font-weight:500}
+.seller-comments{font-size:14px;line-height:1.7;color:var(--t2);max-height:300px;overflow-y:auto;padding:12px;background:var(--bg3);border-radius:var(--rs);border:1px solid var(--bc)}
 .dv{max-width:960px;margin:0 auto;padding:20px}
 .bbk{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:var(--bg2);color:var(--t2);border:1px solid var(--bc);border-radius:var(--rs);font-size:13px;font-weight:500;cursor:pointer;transition:all var(--tr);margin-bottom:20px;min-height:44px}
 .bbk:hover{color:var(--ac);border-color:var(--ac)}.bbk svg{width:16px;height:16px}
@@ -591,6 +680,8 @@ html,body{font-family:var(--ff);background:var(--bg1);color:var(--t1);line-heigh
 .np{padding:4px 10px;background:var(--acL);color:var(--ac);border-radius:12px;font-size:12px;font-weight:500}
 
 /* mobile */
+.mstats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;padding:12px 16px;background:var(--bg2);border:1px solid var(--bc);border-radius:var(--rs)}.mst{flex:1;min-width:100px;text-align:center}.msl{display:block;font-size:11px;color:var(--tm);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}.msv{font-size:15px;font-weight:700;color:var(--t1)}
+.nlp-bar{margin-bottom:14px}.nlp-wrap{display:flex;gap:8px}.nlp-input{flex:1;padding:10px 14px;border:1px solid var(--bc);border-radius:var(--rs);background:var(--bg2);color:var(--t1);font-size:14px;outline:none;transition:border-color var(--tr)}.nlp-input:focus{border-color:var(--ac)}.nlp-input::placeholder{color:var(--tm)}.nlp-go{padding:10px 14px;background:var(--ac);color:#fff;border:none;border-radius:var(--rs);cursor:pointer;display:flex;align-items:center}.nlp-go svg{width:18px;height:18px}.nlp-go:hover{background:var(--acH)}
 .mft{display:none;padding:10px 16px;background:var(--bg2);border:1px solid var(--bc);border-radius:var(--rs);color:var(--t2);font-size:13px;font-weight:600;cursor:pointer;width:100%;text-align:center;margin-bottom:16px;min-height:44px;align-items:center;justify-content:center;gap:6px}.mft svg{width:16px;height:16px}
 .fov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200}.fov.vis{display:block}
 .fdw{position:fixed;top:0;left:-320px;width:300px;height:100%;background:var(--bg2);z-index:201;overflow-y:auto;transition:left .3s ease;padding:20px;display:flex;flex-direction:column;gap:18px}.fdw.op{left:0}
@@ -608,6 +699,9 @@ html,body{font-family:var(--ff);background:var(--bg1);color:var(--t1);line-heigh
   .hdr-l span{font-size:16px}.aki{display:none}
   .sb{display:none}.mft{display:flex}
   .dtt{font-size:22px}.dpv{font-size:28px}.dp{height:220px}
+  .dv-inner{max-width:100%!important}
+  .carousel-main{height:260px}
+  .car-thumb{width:50px;height:38px}
 }
 @media(min-width:769px){.fov,.fdw{display:none!important}}
 .fi{animation:fi .3s ease}@keyframes fi{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
@@ -662,6 +756,8 @@ function hFilters(drawer=false): string {
     <div class="fs"><h3>Body Type</h3><div class="cg">${chips(BODY_TYPES,"body_type")}</div></div>
     <div class="fs"><h3>Fuel Type</h3><div class="cg">${chips(FUEL_TYPES,"fuel_type")}</div></div>
     <div class="fs"><h3>Drivetrain</h3><div class="cg">${chips(DRIVETRAINS,"drivetrain")}</div></div>
+    <div class="fs"><h3>Exterior Color</h3><div class="cg">${chips(EXTERIOR_COLORS,"exterior_color")}</div></div>
+    <div class="fs"><h3>Interior Color</h3><div class="cg">${chips(INTERIOR_COLORS,"interior_color")}</div></div>
     <div class="fs"><h3>Location</h3>
       <div class="fr">
         <input class="fin" id="${px}fzp" type="text" placeholder="ZIP Code" maxlength="5" value="${f.zip||""}">
@@ -698,7 +794,7 @@ function hCard(c: CarListing, i: number): string {
       ${c.photo_url?`<img src="${esc(c.photo_url)}" alt="${esc(c.heading)}" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:""}
       <div class="cpp" style="color:${col}${c.photo_url?";display:none":""}">${IC.carSil}<span class="cpm">${esc(c.make)}</span></div>
       ${b.length?`<div class="cbs">${b.map(x=>`<span class="bdg" style="background:${x.c}">${x.t}</span>`).join("")}</div>`:""}
-      <span class="cdm">${c.dom}d on market</span>
+      <span class="cdm">${c.dom>0?c.dom+"d on market":"New"}</span>
     </div>
     <div class="cby">
       <div class="ctt">${esc(c.heading)}</div>
@@ -720,11 +816,18 @@ function vSearch(): string {
     <div class="fov${S.drawerOpen?" vis":""}" data-a="cdw"></div>
     <div class="fdw${S.drawerOpen?" op":""}">${hFilters(true)}</div>
     <main class="mn">
+      <div class="nlp-bar">
+        <div class="nlp-wrap">
+          <input type="text" id="nlpBarIn" class="nlp-input" placeholder="Describe what you're looking for... e.g. 'red Toyota SUV under $35,000'" value="${S._lastNlp||""}" />
+          <button class="nlp-go" data-a="nlpbar">${IC.search}</button>
+        </div>
+      </div>
       <button class="mft" data-a="odw">${IC.filter} Filters</button>
       <div class="rb">
         <div class="rc"><b>${fmt(S.total)}</b> vehicles found${S.mock?`<span class="mb">Sample Data</span>`:""}</div>
         ${tags.length?`<div class="fts">${tags.map(t=>`<span class="ft">${esc(t.label)}<span class="ftx" data-a="rf" data-k="${t.key}">x</span></span>`).join("")}</div>`:""}
       </div>
+      ${(()=>{ const s=stats(); return s?`<div class="mstats"><div class="mst"><span class="msl">Avg Price</span><span class="msv">${fmtP(s.pAvg)}</span></div><div class="mst"><span class="msl">Price Range</span><span class="msv">${fmtP(s.pMin)} – ${fmtP(s.pMax)}</span></div><div class="mst"><span class="msl">Avg Mileage</span><span class="msv">${fmt(s.mAvg)} mi</span></div><div class="mst"><span class="msl">Results</span><span class="msv">${fmt(S.listings.length)}</span></div></div>`:""; })()}
       ${S.loading?`<div class="ld"><div class="spin"></div><span class="ldt">Searching vehicles...</span></div>`
         :S.listings.length?`<div class="cg2">${S.listings.map((c,i)=>hCard(c,i)).join("")}</div>${more?`<div class="lmc"><button class="blm" data-a="lm">Load More Vehicles</button></div>`:""}`
         :`<div class="emp">${IC.car}<h3>No vehicles found</h3><p>Try adjusting your filters or search criteria</p></div>`}
@@ -738,21 +841,37 @@ function vDetail(): string {
   const b = badges(c), col = bCol(c.body_type), cp = comps(c);
   let pp = 50;
   if (c.predicted_price && c.price) pp = Math.max(5,Math.min(95, c.price/c.predicted_price*50));
+  const allPhotos = c.photo_urls?.length ? c.photo_urls : (c.photo_url ? [c.photo_url] : []);
+  const photoIdx = S._detailPhotoIdx || 0;
 
+  // Only show spec rows that have values
   const specRows = [
     ["Engine",c.engine],["Transmission",c.transmission],["Drivetrain",c.drivetrain],["Fuel Type",c.fuel_type],
-    ["Mileage",c.miles?fmt(c.miles)+" mi":"N/A"],["Exterior Color",c.exterior_color],["Interior Color",c.interior_color],
-    ["Body Type",c.body_type],["Doors",c.doors?String(c.doors):"N/A"],["VIN",c.vin],
-    ["City MPG",c.city_mpg?String(c.city_mpg):"N/A"],["Highway MPG",c.highway_mpg?String(c.highway_mpg):"N/A"],
-    ["Days on Market",String(c.dom)],["First Seen",c.first_seen||"N/A"],
-  ];
+    ["Mileage",c.miles?fmt(c.miles)+" mi":""],["Exterior Color",c.exterior_color],["Interior Color",c.interior_color],
+    ["Body Type",c.body_type],["Doors",c.doors?String(c.doors):""],["VIN",c.vin],
+    ["Cylinders",c.cylinders?String(c.cylinders):""],["Engine Size",c.engine_size],
+    ["City MPG",c.city_mpg?String(c.city_mpg):""],["Highway MPG",c.highway_mpg?String(c.highway_mpg):""],
+    ["MSRP",c.msrp?fmtP(c.msrp):""],
+    ["Days on Market",c.dom?String(c.dom):""],["First Seen",c.first_seen||""],
+  ].filter(([_,v])=>v); // Filter out empty values
 
-  return `<div class="dv fi">
+  return `<div class="dv-wrap fi">
     <button class="bbk" data-a="bts">${IC.left} Back to Results</button>
+    <div class="dv-inner">
+    <!-- Photo Carousel -->
     <div class="dh">
-      <div class="dp" style="background:linear-gradient(135deg,${col}33,${col}55)">
-        ${c.photo_url?`<img src="${esc(c.photo_url)}" alt="${esc(c.heading)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`:""}
-        <div class="dpp" style="color:${col}${c.photo_url?";display:none":""}">${IC.carSil}<span class="dpm">${esc(c.make)} ${esc(c.model)}</span></div>
+      <div class="carousel-wrap">
+        ${allPhotos.length>0?`
+          <div class="carousel-main" style="background:linear-gradient(135deg,${col}22,${col}44)">
+            <img id="carousel-img" src="${esc(allPhotos[photoIdx])}" alt="${esc(c.heading)}" onerror="this.style.display='none'">
+            ${allPhotos.length>1?`
+              <button class="car-nav car-prev" data-a="cprev">${IC.left}</button>
+              <button class="car-nav car-next" data-a="cnext">${IC.right}</button>
+              <span class="car-count">${photoIdx+1} / ${allPhotos.length}</span>
+            `:""}
+          </div>
+          ${allPhotos.length>1?`<div class="carousel-thumbs">${allPhotos.slice(0,12).map((p,i)=>`<img class="car-thumb${i===photoIdx?" active":""}" src="${esc(p)}" data-a="cthumb" data-pi="${i}" alt="Photo ${i+1}" onerror="this.style.display='none'">`).join("")}</div>`:""}
+        `:`<div class="carousel-main" style="background:linear-gradient(135deg,${col}33,${col}55)"><div class="dpp" style="color:${col}">${IC.carSil}<span class="dpm">${esc(c.make)} ${esc(c.model)}</span></div></div>`}
       </div>
       <div class="dhb">
         <div class="dtt">${esc(c.heading)}</div>
@@ -763,8 +882,20 @@ function vDetail(): string {
     </div>
 
     <div class="ds"><div class="dst">${IC.grid} Specifications</div>
-      <div class="sg">${specRows.map(([l,v])=>`<div class="si"><span class="sil">${l}</span><span class="siv">${esc(v||"N/A")}</span></div>`).join("")}</div>
+      <div class="sg">${specRows.map(([l,v])=>`<div class="si"><span class="sil">${l}</span><span class="siv">${esc(v)}</span></div>`).join("")}</div>
     </div>
+
+    ${c.options.length?`<div class="ds"><div class="dst">&#9881; Options &amp; Packages</div>
+      <div class="opt-grid">${c.options.map(o=>`<span class="opt-tag">${esc(o)}</span>`).join("")}</div>
+    </div>`:""}
+
+    ${c.features.length?`<div class="ds"><div class="dst">&#9733; Key Features</div>
+      <div class="opt-grid">${c.features.map(f=>`<span class="feat-tag">${esc(f)}</span>`).join("")}</div>
+    </div>`:""}
+
+    ${c.seller_comments?`<div class="ds"><div class="dst">&#128172; Seller Comments</div>
+      <div class="seller-comments">${esc(c.seller_comments).replace(/\n/g,"<br>")}</div>
+    </div>`:""}
 
     ${c.predicted_price?`<div class="ds"><div class="dst">${IC.tag} Price Analysis</div>
       <div class="pa"><div class="pbc"><div class="pbt"><div class="pbm" style="left:${pp}%"></div></div><div class="pbl"><span>Below Market</span><span>Above Market</span></div></div>
@@ -791,6 +922,7 @@ function vDetail(): string {
       <button class="ba" data-a="shv">${IC.share} Share This Vehicle</button>
       <button class="ba pri" data-a="bts">${IC.left} Back to Search</button>
     </div>
+    </div>
   </div>`;
 }
 
@@ -808,9 +940,13 @@ function vNlp(): string {
   </div>`;
 }
 
+const _titleWords = ["Car Search", "Natural Language Search"];
+let _titleIdx = 0;
+setInterval(() => { _titleIdx = (_titleIdx + 1) % _titleWords.length; const el = document.getElementById("hdr-title"); if (el) { el.style.opacity = "0"; setTimeout(() => { el.textContent = _titleWords[_titleIdx]; el.style.opacity = "1"; }, 300); } }, 3000);
+
 function hHeader(): string {
   return `<header class="hdr">
-    <div class="hdr-l"><img src="https://34682200.delivery.rocketcdn.me/wp-content/uploads/2024/05/cropped-MC-Icon.png.webp" alt="MC" onerror="this.style.display='none'"><span>Car Search</span></div>
+    <div class="hdr-l"><img src="https://34682200.delivery.rocketcdn.me/wp-content/uploads/2024/05/cropped-MC-Icon.png.webp" alt="MC" onerror="this.style.display='none'"><span id="hdr-title" style="transition:opacity 0.3s ease">${_titleWords[_titleIdx]}</span></div>
     <div class="hdr-r">
       <div class="aki"><input type="text" id="akIn" placeholder="API Key" value="${esc(apiKey()||"")}"></div>
       <button class="hb${S.view==="nlp"?" on":""}" data-a="tnlp">${IC.spark}<span>NLP Search</span></button>
@@ -853,12 +989,36 @@ function bind() {
     };
   }
 
-  // Make dropdown cascading
+  // Make dropdown — cascading + immediate search
   for (const id of ["fmk","d-fmk"]) {
     const el = document.getElementById(id) as HTMLSelectElement;
     if (el) {
-      el.onchange = () => { S.filters.make = el.value||undefined; delete S.filters.model; draw(); };
+      el.onchange = () => { S.filters.make = el.value||undefined; delete S.filters.model; readDOM(); doSearch(); };
     }
+  }
+
+  // Model dropdown — immediate search on change
+  for (const id of ["fmd","d-fmd"]) {
+    const el = document.getElementById(id) as HTMLSelectElement;
+    if (el) el.onchange = () => { readDOM(); doSearch(); };
+  }
+
+  // Select dropdowns (sort, radius, year min/max) — immediate search on change
+  for (const id of ["fst","d-fst","frd","d-frd","fymn","d-fymn","fymx","d-fymx"]) {
+    const el = document.getElementById(id) as HTMLSelectElement;
+    if (el) el.onchange = () => { readDOM(); doSearch(); };
+  }
+
+  // NLP bar Enter key
+  const nlpBar = document.getElementById("nlpBarIn") as HTMLInputElement;
+  if (nlpBar) {
+    nlpBar.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); if (nlpBar.value.trim()) runNlp(nlpBar.value); } };
+  }
+
+  // Text/number inputs (price min/max, miles, zip) — auto-search on input with debounce
+  for (const id of ["fpmn","fpmx","fml","fzp","d-fpmn","d-fpmx","d-fml","d-fzp"]) {
+    const el = document.getElementById(id) as HTMLInputElement;
+    if (el) el.oninput = () => autoSearch();
   }
 }
 
@@ -880,7 +1040,7 @@ function readDOM(px="") {
 }
 
 function resetAll() {
-  const keys: (keyof SearchFilters)[] = ["make","model","year_range","price_range","miles_range","body_type","fuel_type","drivetrain","zip","radius","sort_by"];
+  const keys: (keyof SearchFilters)[] = ["make","model","year_range","price_range","miles_range","body_type","fuel_type","drivetrain","exterior_color","interior_color","zip","radius","sort_by"];
   keys.forEach(k => delete S.filters[k]);
   S.filters.start=0; S.filters.rows=24; S.page=0;
   S.mock=true; S.listings=[...MOCK]; S.total=MOCK.length;
@@ -891,11 +1051,19 @@ function toggleChip(key: keyof SearchFilters, val: string) {
   const i = cur.indexOf(val);
   if (i>=0) cur.splice(i,1); else cur.push(val);
   if (cur.length) (S.filters as any)[key]=cur.join(","); else delete S.filters[key];
-  draw();
+  doSearch();
+}
+
+// Debounced auto-search: triggers search 500ms after last filter change
+let _searchTimer: ReturnType<typeof setTimeout>|null = null;
+function autoSearch() {
+  if (_searchTimer) clearTimeout(_searchTimer);
+  _searchTimer = setTimeout(() => { readDOM(); doSearch(); }, 500);
 }
 
 function runNlp(query: string) {
   if (!query.trim()) return;
+  S._lastNlp = query;
   const p = parseNlp(query);
   const el = document.getElementById("nlpP");
   if (el) {
@@ -940,7 +1108,7 @@ function onClick(e: Event) {
       S.statsOpen=!S.statsOpen; draw(); break;
     case "vd": {
       const i=parseInt(t.dataset.i||"-1");
-      if (i>=0&&i<S.listings.length) { S.view="details"; S.detailIdx=i; setHash(); draw(); window.scrollTo(0,0); }
+      if (i>=0&&i<S.listings.length) { S.view="details"; S.detailIdx=i; S._detailPhotoIdx=0; setHash(); draw(); window.scrollTo(0,0); }
     } break;
     case "vc": {
       const id=t.dataset.id, ci=parseInt(t.dataset.i||"-1");
@@ -976,6 +1144,22 @@ function onClick(e: Event) {
       const q=t.dataset.q||"";
       const inp=document.getElementById("nlpIn") as HTMLTextAreaElement;
       if (inp) { inp.value=q; runNlp(q); }
+    } break;
+    case "nlpbar": {
+      const inp=document.getElementById("nlpBarIn") as HTMLInputElement;
+      if (inp?.value.trim()) runNlp(inp.value);
+    } break;
+    case "cprev": {
+      const c=S.listings[S.detailIdx];
+      if (c?.photo_urls?.length) { S._detailPhotoIdx = (S._detailPhotoIdx - 1 + c.photo_urls.length) % c.photo_urls.length; draw(); }
+    } break;
+    case "cnext": {
+      const c=S.listings[S.detailIdx];
+      if (c?.photo_urls?.length) { S._detailPhotoIdx = (S._detailPhotoIdx + 1) % c.photo_urls.length; draw(); }
+    } break;
+    case "cthumb": {
+      const pi=parseInt(t.dataset.pi||"0");
+      S._detailPhotoIdx = pi; draw();
     } break;
   }
 }

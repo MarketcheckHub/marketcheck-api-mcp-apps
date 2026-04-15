@@ -199,7 +199,24 @@ const APPS = [
     tagline: "VIN-based market report — embeddable widget like CarStory.ai",
     segment: "Consumer",
     toolName: "generate-vin-market-report",
-    description: "Generates a comprehensive VIN-level market report including vehicle specs, predicted fair market price (retail and wholesale), listing history timeline, active comparable listings, recently sold comparables, sold volume summary, and applicable OEM incentives for newer vehicles. Think of it as a CarStory.ai-style embeddable widget.",
+    description: "The VIN Market Report is a comprehensive, single-page vehicle market intelligence report. Enter a VIN and get an instant analysis covering: vehicle specs decoded from the VIN, ML-predicted fair market value (franchise and independent dealer prices), deal score gauge (Great Deal to Overpriced), market position among comparable vehicles (price/miles/DOM percentiles with cluster visualization), price history timeline across dealers, active and sold comparable listings, depreciation story with 1-year projection, market trend indicators, and applicable OEM incentives for recent models. Designed as an embeddable widget (like CarStory.ai) with full standalone, iframe, and MCP support. Report history is stored in the browser session — users can re-run any previous report with one click.",
+    useCases: [
+      { persona: "Car Shoppers", desc: "Paste a VIN from any listing to see if it's a good deal — get a Buy/Negotiate/Pass score backed by ML predictions and real comparable data." },
+      { persona: "Dealer Websites", desc: "Embed as a widget on your VDP (vehicle detail page) to build buyer trust with transparent market data. Supports iframe embed and compact mode." },
+      { persona: "Auto Lenders", desc: "Validate collateral value with franchise and independent dealer FMV predictions, confidence ranges, and comparable evidence." },
+      { persona: "Insurance Adjusters", desc: "Use for pre-loss valuation — the report provides market position, comparable sales, and price history needed for settlement documentation." },
+      { persona: "Appraisers", desc: "Desktop appraisal in seconds — dual-tier pricing, active and sold comps, depreciation trajectory, and full listing history." },
+      { persona: "Auto Media / Content", desc: "Generate market reports for editorial content — the report includes quotable stats, trend data, and shareable visualizations." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "vin", desc: "17-character VIN — auto-fills the form and triggers report generation" },
+      { name: "price", desc: "Asking price — also accepts askingPrice, asking_price" },
+      { name: "miles", desc: "Current mileage — also accepts mileage" },
+      { name: "zip", desc: "ZIP code for local comps — also accepts zipcode, zip_code" },
+      { name: "compact", desc: "Set to 'true' for a narrow 400px widget mode (for iframes)" },
+      { name: "embed", desc: "Set to 'true' for embedded mode (hides settings gear)" },
+    ],
     inputParams: [
       { name: "vin", type: "string", required: true, desc: "17-character VIN" },
       { name: "price", type: "number", required: false, desc: "Listed/asking price for deal scoring" },
@@ -207,12 +224,12 @@ const APPS = [
       { name: "zip", type: "string", required: false, desc: "ZIP code for local comparables" },
     ],
     apiFlow: [
-      { step: 1, label: "Decode VIN", apis: ["decode"], parallel: false, note: "Get year, make, model to drive subsequent searches" },
-      { step: 2, label: "Price + History", apis: ["predictRetail", "predictWholesale", "carHistory"], parallel: true, note: "Fetch retail price, wholesale price, and listing history in parallel" },
-      { step: 3, label: "Comparables + Market", apis: ["searchActive", "searchRecents", "soldSummary"], parallel: true, note: "Use decoded make/model to search active comps, sold comps, and sold volume" },
-      { step: 4, label: "Incentives (conditional)", apis: ["incentives"], parallel: false, note: "Only for vehicles within 1 year of current — fetch applicable OEM incentives" },
+      { step: 1, label: "Decode VIN", apis: ["decode"], parallel: false, note: "Get year, make, model, trim, engine, transmission, drivetrain, MSRP — needed to drive all subsequent searches" },
+      { step: 2, label: "Price + History", apis: ["predictRetail", "predictWholesale", "carHistory"], parallel: true, note: "Three parallel calls: franchise dealer FMV prediction, independent dealer FMV prediction, and full listing history (dealer hops, price changes over time)" },
+      { step: 3, label: "Comparables + Market", apis: ["searchActive", "searchRecents", "soldSummary"], parallel: true, note: "Three parallel calls: active comparable listings (year ±1, 100mi radius, with price/miles/DOM stats), recently sold comparables, and sold volume summary for market context" },
+      { step: 4, label: "Incentives (conditional)", apis: ["incentives"], parallel: false, note: "Only for vehicles within 1 model year of current — fetch cash back, APR, and lease specials from the OEM" },
     ],
-    renders: "Deal score gauge, price prediction with confidence band, price vs comparables chart, listing history timeline, comparable vehicles carousel, sold market summary, incentive badges (if applicable)",
+    renders: "Deal score gauge (Great Deal → Overpriced), vehicle spec card (decoded from VIN), market position with 3 range bars (price/miles/DOM percentiles), ML price prediction with confidence band (franchise + independent), comparable cluster strips (dot distribution showing where this vehicle lands), active comparables carousel with VDP links, recently sold comparables table, price history timeline chart (auto-spaced labels for cluttered data), depreciation story with total loss/appreciation and 1-year projection, market trend sparkline, OEM incentive badges, report history sidebar (sessionStorage / max 1000)",
   },
   {
     id: "car-search-compare",
@@ -1851,6 +1868,41 @@ pre.code-block {
     <h2>What This App Does</h2>
     <p>${app.description}</p>
   </div>
+
+  ${app.useCases ? `<!-- Who Can Use This -->
+  <div class="section">
+    <h2>Who Can Use This</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
+      ${app.useCases.map(uc => `<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">${uc.persona}</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">${uc.desc}</div>
+      </div>`).join("")}
+    </div>
+  </div>` : ""}
+
+  ${app.urlParams ? `<!-- URL Parameters -->
+  <div class="section">
+    <h2>URL Parameters</h2>
+    <p>Pass parameters directly in the URL to pre-fill the form and auto-generate the report:</p>
+    <table class="param-table">
+      <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+      <tbody>
+        ${app.urlParams.map(p => `<tr><td><code>${p.name}</code></td><td>${p.desc}</td></tr>`).join("")}
+      </tbody>
+    </table>
+    <h3>URL Examples</h3>
+    <pre class="code-block"># Basic — auto-generate a report for a VIN
+https://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658
+
+# Full — with asking price, mileage, and ZIP for deal scoring
+https://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;price=25000&amp;miles=35000&amp;zip=90044
+
+# Compact widget — for iframe embeds (400px width)
+https://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;compact=true&amp;embed=true
+
+# Using aliases
+https://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;askingPrice=25000&amp;mileage=35000&amp;zipcode=90044</pre>
+  </div>` : ""}
 
   <!-- Screenshot -->
   <div class="section">

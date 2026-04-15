@@ -80,21 +80,28 @@ async function handleIncentives(auth: { mode: string; value: string }, args: any
 /** Transform OEM incentive API listings into the app-friendly format */
 function transformIncentiveListings(apiResponse: any): any[] {
   const listings = apiResponse?.listings || [];
+  // Map API offer_type to both app formats
+  const typeMap: Record<string, { short: string; long: string }> = {
+    cash: { short: "cashback", long: "CASH_BACK" },
+    finance: { short: "apr", long: "LOW_APR" },
+    lease: { short: "lease", long: "LEASE_SPECIAL" },
+  };
   return listings.map((listing: any) => {
     const o = listing.offer || {};
     const v = (o.vehicles || [])[0] || {};
     const amt = (o.amounts || [])[0] || {};
-    const offerType = o.offer_type === "cash" ? "cashback" : o.offer_type === "finance" ? "apr" : o.offer_type === "lease" ? "lease" : o.offer_type || "cashback";
-    const amount = offerType === "cashback" ? (o.cashback_amount || 0) : offerType === "apr" ? (amt.apr || 0) : (amt.monthly || 0);
-    const amountDisplay = offerType === "cashback" ? `$${amount.toLocaleString()} Cash Back`
-      : offerType === "apr" ? `${amount}% APR / ${amt.term || 0}mo`
+    const mapped = typeMap[o.offer_type] || { short: o.offer_type || "cashback", long: "CASH_BACK" };
+    const amount = mapped.short === "cashback" ? (o.cashback_amount || 0)
+      : mapped.short === "apr" ? (amt.apr || 0) : (amt.monthly || 0);
+    const amountDisplay = mapped.short === "cashback" ? `$${amount.toLocaleString()} Cash Back`
+      : mapped.short === "apr" ? `${amount}% APR / ${amt.term || 0}mo`
       : `$${amount}/mo / ${amt.term || 0}mo`;
     return {
       id: listing.id || "",
       make: v.make || "",
       model: v.model || "",
-      type: offerType,
-      offerType,
+      type: mapped.long,        // OEM incentives explorer format
+      offerType: mapped.short,  // incentive-deal-finder format
       title: (o.titles?.[0] || o.oem_program_name || `${v.make} ${o.offer_type || "offer"}`),
       description: (o.offers?.[0] || "").substring(0, 300),
       amount,
@@ -107,7 +114,6 @@ function transformIncentiveListings(apiResponse: any): any[] {
       stackable: false,
       finePrint: (o.disclaimers?.[0] || "").substring(0, 300),
       region: listing.state || listing.city || "National",
-      raw: listing,
     };
   });
 }

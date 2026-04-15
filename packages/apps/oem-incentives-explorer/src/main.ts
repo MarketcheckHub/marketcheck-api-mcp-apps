@@ -4,7 +4,8 @@
  */
 import { App } from "@modelcontextprotocol/ext-apps";
 
-const _safeApp = (() => { try { return new App({ name: "oem-incentives-explorer" });
+let _safeApp: any = null;
+try { _safeApp = new App({ name: "oem-incentives-explorer" }); } catch {}
 
 // ── Dual-Mode Data Provider ────────────────────────────────────────────
 function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | null } {
@@ -17,8 +18,8 @@ function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | n
 }
 
 function _detectAppMode(): "mcp" | "live" | "demo" {
-  if (_safeApp) return "mcp";
   if (_getAuth().value) return "live";
+  if (_safeApp) return "mcp";
   return "demo";
 }
 
@@ -40,24 +41,67 @@ function _proxyBase(): string {
   return location.protocol.startsWith("http") ? "" : "http://localhost:3001";
 }
 
-async function _callTool(toolName: string, args: Record<string, any>): Promise<any> {
-  if (_safeApp) {
-    try {
-      const r = await _safeApp.callServerTool({ name: toolName, arguments: args }); return r;
-            
-    } catch {}
+// ── Direct MarketCheck API Client (browser → api.marketcheck.com) ──────
+const _MC = "https://api.marketcheck.com";
+async function _mcApi(path, params = {}) {
+  const auth = _getAuth();
+  if (!auth.value) return null;
+  const prefix = path.startsWith("/api/") ? "" : "/v2";
+  const url = new URL(_MC + prefix + path);
+  if (auth.mode === "api_key") url.searchParams.set("api_key", auth.value);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
+  const headers = {};
+  if (auth.mode === "oauth_token") headers["Authorization"] = "Bearer " + auth.value;
+  const res = await fetch(url.toString(), { headers });
+  if (!res.ok) throw new Error("MC API " + res.status);
+  return res.json();
+}
+function _mcDecode(vin) { return _mcApi("/decode/car/neovin/" + vin + "/specs"); }
+function _mcPredict(p) { return _mcApi("/predict/car/us/marketcheck_price/comparables", p); }
+function _mcActive(p) { return _mcApi("/search/car/active", p); }
+function _mcRecent(p) { return _mcApi("/search/car/recents", p); }
+function _mcHistory(vin) { return _mcApi("/history/car/" + vin); }
+function _mcSold(p) { return _mcApi("/api/v1/sold-vehicles/summary", p); }
+function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;delete q.oem;} return _mcApi("/search/car/incentive/oem", q); }
+function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
+function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
+
+async function _fetchDirect(args) {
+  const incentives = await _mcIncentives({oem:args.make,zip:args.zip,model:args.model});
+  let compareIncentives = [];
+  if (args.compareMakes?.length) {
+    compareIncentives = await Promise.all(args.compareMakes.map(async (make) => {
+      const data = await _mcIncentives({oem:make,zip:args.zip});
+      return {make,data};
+    }));
+  }
+  return {make:args.make,incentives,compareIncentives};
+}
+
+async function _callTool(toolName, args) {
   const auth = _getAuth();
   if (auth.value) {
+    // 1. Proxy (same-origin, reliable)
     try {
-      const r = await fetch(`${_proxyBase()}/api/proxy/${toolName}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const r = await fetch((_proxyBase()) + "/api/proxy/" + toolName, {
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...args, _auth_mode: auth.mode, _auth_value: auth.value }),
       });
       if (r.ok) { const d = await r.json(); return { content: [{ type: "text", text: JSON.stringify(d) }] }; }
     } catch {}
+    // 2. Direct API fallback
+    try {
+      const data = await _fetchDirect(args);
+      if (data) return { content: [{ type: "text", text: JSON.stringify(data) }] };
+    } catch {}
   }
+  // 3. MCP mode (Claude, VS Code, etc.)
+  if (_safeApp) {
+    try { return await _safeApp.callServerTool({ name: toolName, arguments: args }); } catch {}
+  }
+  // 4. Demo mode
   return null;
 }
 
@@ -140,8 +184,6 @@ function _addSettingsBar(headerEl?: HTMLElement) {
   `;
   document.head.appendChild(s);
 })();
-
- } catch { return null; } })();
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -948,7 +990,7 @@ function renderContent(): string {
     html += `<div class="cards-grid">`;
 
     for (const inc of result.incentives) {
-      const tc = TYPE_CONFIG[inc.type];
+      const tc = TYPE_CONFIG[inc.type] || { label: inc.type || "OFFER", color: "#94a3b8", bg: "rgba(148,163,184,0.15)" };
       const days = daysUntil(inc.expirationDate);
       let urgencyClass = "";
       if (days <= 7) urgencyClass = "urgent";
@@ -1325,6 +1367,33 @@ function bootstrap(): void {
   const root = document.createElement("div");
   root.id = "app-root";
   document.body.appendChild(root);
+
+  // ── Demo mode banner ──
+  if (_detectAppMode() === "demo") {
+    const _db = document.createElement("div");
+    _db.id = "_demo_banner";
+    _db.style.cssText = "background:linear-gradient(135deg,#92400e22,#f59e0b11);border:1px solid #f59e0b44;border-radius:10px;padding:14px 20px;margin-bottom:12px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;";
+    _db.innerHTML = `
+      <div style="flex:1;min-width:200px;">
+        <div style="font-size:13px;font-weight:700;color:#fbbf24;margin-bottom:2px;">&#9888; Demo Mode — Showing sample data</div>
+        <div style="font-size:12px;color:#d97706;">Enter your MarketCheck API key to see real market data. <a href="https://developers.marketcheck.com" target="_blank" style="color:#fbbf24;text-decoration:underline;">Get a free key</a></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="_banner_key" type="text" placeholder="Paste your API key" style="padding:8px 12px;border-radius:6px;border:1px solid #f59e0b44;background:#0f172a;color:#e2e8f0;font-size:13px;width:220px;outline:none;" />
+        <button id="_banner_save" style="padding:8px 16px;border-radius:6px;border:none;background:#f59e0b;color:#0f172a;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">Activate</button>
+      </div>`;
+    document.body.insertBefore(_db, document.body.firstChild);
+    _db.querySelector("#_banner_save").addEventListener("click", () => {
+      const k = _db.querySelector("#_banner_key").value.trim();
+      if (!k) return;
+      localStorage.setItem("mc_api_key", k);
+      _db.style.background = "linear-gradient(135deg,#05966922,#10b98111)";
+      _db.style.borderColor = "#10b98144";
+      _db.innerHTML = '<div style="font-size:13px;font-weight:700;color:#10b981;">&#10003; API key saved — reloading with live data...</div>';
+      setTimeout(() => location.reload(), 800);
+    });
+    _db.querySelector("#_banner_key").addEventListener("keydown", (e) => { if (e.key === "Enter") _db.querySelector("#_banner_save").click(); });
+  }
   render();
 }
 
