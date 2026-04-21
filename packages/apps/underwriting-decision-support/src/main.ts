@@ -27,7 +27,7 @@ function _isEmbedMode(): boolean {
 function _getUrlParams(): Record<string, string> {
   const params = new URLSearchParams(location.search);
   const result: Record<string, string> = {};
-  for (const key of ["vin", "zip", "make", "model", "miles", "state", "dealer_id", "ticker", "price", "postal_code"]) {
+  for (const key of ["vin", "zip", "make", "model", "miles", "state", "dealer_id", "ticker", "price", "postal_code", "loan_amount", "loan_term", "interest_rate"]) {
     const v = params.get(key);
     if (v) result[key] = v;
   }
@@ -65,10 +65,107 @@ function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;dele
 function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
 function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
 
-async function _fetchDirect(args) {
+async function _fetchDirect(args): Promise<EvalResult | null> {
   const decode = await _mcDecode(args.vin);
-  const [retail,wholesale,history,soldComps] = await Promise.all([_mcPredict({...args,dealer_type:"franchise"}),_mcPredict({...args,dealer_type:"independent"}),_mcHistory(args.vin),_mcRecent({make:decode?.make,model:decode?.model,zip:args.zip,radius:100,rows:8,stats:"price"})]);
-  return {decode,retail,wholesale,history,soldComps};
+  if (!decode) return null;
+
+  const [retail, wholesale, history, soldCompsRaw] = await Promise.all([
+    _mcPredict({ vin: args.vin, miles: args.miles, zip: args.zip, dealer_type: "franchise" }),
+    _mcPredict({ vin: args.vin, miles: args.miles, zip: args.zip, dealer_type: "independent" }),
+    _mcHistory(args.vin),
+    _mcRecent({ make: decode.make, model: decode.model, zip: args.zip, radius: 100, rows: 8, stats: "price" }),
+  ]);
+
+  const retailValue = retail?.predicted_price ?? retail?.price ?? 0;
+  const wholesaleValue = wholesale?.predicted_price ?? wholesale?.price ?? 0;
+  const loanAmt = args.loan_amount ?? 0;
+  const loanTerm = args.loan_term ?? 60;
+  const interestRate = args.interest_rate ?? 6.9;
+  const monthlyRate = interestRate / 100 / 12;
+
+  const payment = monthlyRate > 0
+    ? (loanAmt * monthlyRate * Math.pow(1 + monthlyRate, loanTerm)) / (Math.pow(1 + monthlyRate, loanTerm) - 1)
+    : loanAmt / loanTerm;
+
+  const ltv = retailValue > 0 ? (loanAmt / retailValue) * 100 : 0;
+
+  const annualDepRate = 0.15;
+  const monthlyDepRate = annualDepRate / 12;
+  const forecast: DepreciationRow[] = [];
+  for (const months of [12, 24, 36, 48, 60]) {
+    if (months > loanTerm) break;
+    const vehicleVal = retailValue * Math.pow(1 - monthlyDepRate, months);
+    const powFactor = Math.pow(1 + monthlyRate, months);
+    const totalPow = Math.pow(1 + monthlyRate, loanTerm);
+    const balance = Math.max(0, loanAmt * (totalPow - powFactor) / (totalPow - 1));
+    forecast.push({
+      month: months, label: `${months} months`,
+      projected_value: Math.round(vehicleVal),
+      remaining_balance: Math.round(balance),
+      ltv: balance > 0 ? Math.round((balance / vehicleVal) * 100) : 0,
+    });
+  }
+
+  // Map sold comps from recents API
+  const listings = soldCompsRaw?.listings ?? [];
+  const soldComps: SoldComp[] = listings.slice(0, 8).map((l: any) => ({
+    year: l.build?.year ?? l.year ?? decode.year,
+    make: l.build?.make ?? l.make ?? decode.make,
+    model: l.build?.model ?? l.model ?? decode.model,
+    trim: l.build?.trim ?? l.trim ?? "",
+    price: l.price ?? 0,
+    miles: l.miles ?? l.mileage ?? 0,
+    sold_date: l.last_seen_at_date ?? l.scraped_at ?? "",
+    city: l.dealer?.city ?? "",
+    state: l.dealer?.state ?? "",
+  }));
+
+  // Map VIN price history
+  const histListings = history?.listings ?? [];
+  const priceHistory: PriceHistoryEntry[] = histListings.slice(0, 6).map((l: any, i: number) => ({
+    date: l.first_seen_at_date ?? l.scraped_at ?? "",
+    price: l.price ?? 0,
+    dealer: l.dealer?.name ?? "Unknown Dealer",
+    event: i === 0 ? "Listed" : "Price Change",
+  }));
+
+  let risk: "low" | "moderate" | "high" | "very_high" = "low";
+  if (ltv > 120) risk = "very_high";
+  else if (ltv > 100) risk = "high";
+  else if (ltv > 80) risk = "moderate";
+
+  const maxAdvanceRate = 0.85;
+  const compCount = retail?.comparables?.length ?? 0;
+
+  return {
+    vehicle: {
+      vin: decode.vin ?? args.vin,
+      year: decode.year ?? 0,
+      make: decode.make ?? "",
+      model: decode.model ?? "",
+      trim: decode.trim ?? "",
+      body_type: decode.body_type ?? decode.body ?? "",
+      engine: decode.engine ?? "",
+      transmission: decode.transmission ?? "",
+      drivetrain: decode.drivetrain ?? decode.drive_type ?? "",
+      fuel_type: decode.fuel_type ?? "",
+    },
+    valuation: {
+      retail_value: retailValue,
+      wholesale_value: wholesaleValue,
+      confidence_comps: compCount,
+      value_low: retail?.price_range?.low ?? retail?.price_low ?? Math.round(retailValue * 0.92),
+      value_high: retail?.price_range?.high ?? retail?.price_high ?? Math.round(retailValue * 1.08),
+    },
+    ltv_current: Math.round(ltv * 10) / 10,
+    monthly_payment: Math.round(payment * 100) / 100,
+    depreciation_forecast: forecast,
+    sold_comps: soldComps,
+    price_history: priceHistory,
+    max_advance: maxAdvanceRate * 100,
+    max_advance_amount: Math.round(retailValue * maxAdvanceRate),
+    risk_rating: risk,
+  };
 }
 
 async function _callTool(toolName, args) {
@@ -396,34 +493,49 @@ let loading = false;
 
 // ── Data Loading ───────────────────────────────────────────────────────────
 async function evaluateLoan() {
-  if (!loanInput.vin && !loanInput.zip) {
-    // use default mock VIN
+  if (!loanInput.vin) {
     loanInput.vin = "1FTFW1E87NFA12345";
   }
   loading = true;
   render();
 
-  try {
-    const result = await _callTool("evaluate-loan-application", {
-      vin: loanInput.vin,
-      miles: loanInput.miles,
-      loan_amount: loanInput.loan_amount,
-      loan_term: loanInput.loan_term,
-      interest_rate: loanInput.interest_rate,
-      zip: loanInput.zip,
-    });
-    if (result) {
-      const data = JSON.parse(result.content[0].text);
-      if (data.vehicle && data.valuation) {
+  const mode = _detectAppMode();
+
+  if (mode === "live") {
+    try {
+      const data = await _fetchDirect(loanInput);
+      if (data) {
         evalResult = data;
         loading = false;
         render();
         return;
       }
+    } catch (err) {
+      console.error("Direct fetch failed:", err);
     }
-  } catch {}
+  } else if (mode === "mcp" && _safeApp) {
+    try {
+      const result = await _callTool("evaluate-loan-application", {
+        vin: loanInput.vin,
+        miles: loanInput.miles,
+        loan_amount: loanInput.loan_amount,
+        loan_term: loanInput.loan_term,
+        interest_rate: loanInput.interest_rate,
+        zip: loanInput.zip,
+      });
+      if (result) {
+        const data = JSON.parse(result.content[0].text);
+        if (data.vehicle && data.valuation) {
+          evalResult = data;
+          loading = false;
+          render();
+          return;
+        }
+      }
+    } catch {}
+  }
 
-  // Fallback to mock
+  // Demo / fallback to mock
   evalResult = getMockResult(loanInput);
   loading = false;
   render();
@@ -456,12 +568,6 @@ function render() {
 
   renderLoanForm(container);
 
-  if (loading) {
-    const spin = el("div", { style: "text-align:center;padding:60px 0;" });
-    spin.innerHTML = `<div style="display:inline-block;width:40px;height:40px;border:3px solid #334155;border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite;"></div><div style="margin-top:12px;color:#94a3b8;font-size:14px;">Evaluating loan application...</div>`;
-    container.appendChild(spin);
-    document.body.appendChild(container);
-
   // ── Demo mode banner ──
   if (_detectAppMode() === "demo") {
     const _db = document.createElement("div");
@@ -478,7 +584,7 @@ function render() {
       </div>`;
     container.appendChild(_db);
     _db.querySelector("#_banner_save").addEventListener("click", () => {
-      const k = _db.querySelector("#_banner_key").value.trim();
+      const k = (_db.querySelector("#_banner_key") as HTMLInputElement).value.trim();
       if (!k) return;
       localStorage.setItem("mc_api_key", k);
       _db.style.background = "linear-gradient(135deg,#05966922,#10b98111)";
@@ -486,8 +592,14 @@ function render() {
       _db.innerHTML = '<div style="font-size:13px;font-weight:700;color:#10b981;">&#10003; API key saved — reloading with live data...</div>';
       setTimeout(() => location.reload(), 800);
     });
-    _db.querySelector("#_banner_key").addEventListener("keydown", (e) => { if (e.key === "Enter") _db.querySelector("#_banner_save").click(); });
+    _db.querySelector("#_banner_key").addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") (_db.querySelector("#_banner_save") as HTMLButtonElement).click(); });
   }
+
+  if (loading) {
+    const spin = el("div", { style: "text-align:center;padding:60px 0;" });
+    spin.innerHTML = `<div style="display:inline-block;width:40px;height:40px;border:3px solid #334155;border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite;"></div><div style="margin-top:12px;color:#94a3b8;font-size:14px;">Evaluating loan application...</div>`;
+    container.appendChild(spin);
+    document.body.appendChild(container);
     return;
   }
 
@@ -1089,6 +1201,9 @@ if (urlParams.vin) loanInput.vin = urlParams.vin;
 if (urlParams.miles) loanInput.miles = parseInt(urlParams.miles);
 if (urlParams.zip) loanInput.zip = urlParams.zip;
 if (urlParams.price) loanInput.loan_amount = parseInt(urlParams.price);
+if (urlParams.loan_amount) loanInput.loan_amount = parseInt(urlParams.loan_amount);
+if (urlParams.loan_term) loanInput.loan_term = parseInt(urlParams.loan_term);
+if (urlParams.interest_rate) loanInput.interest_rate = parseFloat(urlParams.interest_rate);
 
 if (loanInput.vin) {
   evaluateLoan();
