@@ -11,7 +11,7 @@ function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | n
   if (key) return { mode: "api_key", value: key };
   return { mode: null, value: null };
 }
-function _detectAppMode(): "mcp" | "live" | "demo" { if (_getAuth().value) return "live"; if (_safeApp) return "mcp"; return "demo"; }
+function _detectAppMode(): "mcp" | "live" | "demo" { if (_getAuth().value) return "live"; if (_safeApp && window.parent !== window) return "mcp"; return "demo"; }
 function _isEmbedMode(): boolean { return new URLSearchParams(location.search).has("embed"); }
 function _getUrlParams(): Record<string, string> { const params = new URLSearchParams(location.search); const result: Record<string, string> = {}; for (const key of ["vin","zip","make","model","miles","state","dealer_id","ticker","price"]) { const v = params.get(key); if (v) result[key] = v; } return result; }
 function _proxyBase(): string { return location.protocol.startsWith("http") ? "" : "http://localhost:3001"; }
@@ -44,12 +44,17 @@ function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
 function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
 
 async function _fetchDirect(args) {
-  const vins = (args.vins??"").split(",").map(v=>v.trim()).filter(Boolean);
-  const results = await Promise.all(vins.map(async (vin) => {
-    const [decode,prediction] = await Promise.all([_mcDecode(vin),_mcPredict({vin,dealer_type:"franchise",zip:args.zip})]);
-    return {vin,decode,prediction};
+  const vinEntries: Array<{vin: string; loanAmount: number}> = Array.isArray(args.vins)
+    ? args.vins
+    : (args.vins ?? "").split(",").map((v: string) => ({ vin: v.trim(), loanAmount: 0 })).filter((e: any) => e.vin);
+  const portfolio = await Promise.all(vinEntries.map(async (entry) => {
+    const [decode, priceData] = await Promise.all([
+      _mcDecode(entry.vin),
+      _mcPredict({ vin: entry.vin, dealer_type: "franchise", zip: args.zip }),
+    ]);
+    return { vin: entry.vin, loanAmount: entry.loanAmount, decode, price: priceData };
   }));
-  return {results};
+  return { portfolio };
 }
 async function _callTool(toolName, args) {
   const auth = _getAuth();
@@ -743,8 +748,10 @@ function parseVINInput(): Array<{ vin: string; loanAmount: number }> {
   }).filter(v => v.vin.length >= 10 && v.loanAmount > 0).slice(0, 20);
 }
 
-function categorizeSegment(bodyType: string | undefined, fuelType: string | undefined): Segment {
+const LUXURY_MAKES = ["BMW", "Mercedes", "Mercedes-Benz", "Audi", "Lexus", "Cadillac", "Lincoln", "Infiniti", "Acura", "Porsche", "Jaguar", "Land Rover", "Bentley", "Maserati", "Genesis"];
+function categorizeSegment(bodyType: string | undefined, fuelType: string | undefined, make?: string): Segment {
   if (fuelType?.toLowerCase().includes("electric")) return "EV";
+  if (make && LUXURY_MAKES.some(lm => lm.toLowerCase() === make.toLowerCase())) return "Luxury";
   const bt = (bodyType || "").toLowerCase();
   if (bt.includes("suv") || bt.includes("crossover")) return "SUV";
   if (bt.includes("truck") || bt.includes("pickup")) return "Truck";
@@ -762,8 +769,8 @@ async function loadData(scenario: Scenario, customPct: number): Promise<StressRe
       if (parsed.portfolio && Array.isArray(parsed.portfolio)) {
         const loans: LoanEntry[] = parsed.portfolio.map((p: any) => {
           const decode = p.decode || {};
-          const predicted = p.price?.predicted_price || p.loanAmount * 0.9;
-          const segment: Segment = categorizeSegment(decode.body_type, decode.fuel_type);
+          const predicted = p.price?.predicted_price ?? p.price?.price ?? p.loanAmount * 0.9;
+          const segment: Segment = categorizeSegment(decode.body_type, decode.fuel_type, decode.make);
           const multiplier = getStressMultiplier(segment, decode.fuel_type || "Gas", scenario, customPct);
           const stressedValue = Math.round(predicted * multiplier);
           return {

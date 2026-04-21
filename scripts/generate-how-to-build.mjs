@@ -687,15 +687,24 @@ const APPS = [
     tagline: "What-if depreciation scenarios on your loan book",
     segment: "Lender",
     toolName: "stress-test-portfolio",
-    description: "Runs depreciation stress scenarios on a batch of VINs representing a loan portfolio. Decodes and prices each VIN, then models what-if scenarios (e.g., 10% price drop, accelerated depreciation).",
+    description: "Runs depreciation stress scenarios against a batch of VINs representing an auto loan portfolio. Decodes and prices each VIN using real market data, then models what-if scenarios — EV values drop 20%, trucks drop 15%, market-wide 10% decline, or a custom percentage — to reveal which loans go underwater, by how much, and which vehicle segments carry the most concentrated risk. Outputs an LTV distribution histogram, collateral coverage waterfall, per-segment exposure table, scenario comparison matrix, and a ranked individual loan detail table with HEALTHY / AT RISK / UNDERWATER / DEEP UNDERWATER status badges.",
     inputParams: [
-      { name: "vins", type: "string", required: true, desc: "Comma-separated VINs from loan portfolio" },
-      { name: "zip", type: "string", required: false, desc: "Central ZIP for pricing" },
+      { name: "vins", type: "string", required: true, desc: "Comma-separated VINs from loan portfolio (up to 20)" },
+      { name: "zip", type: "string", required: false, desc: "Central ZIP code for market-based pricing context" },
     ],
     apiFlow: [
-      { step: 1, label: "For each VIN in parallel", apis: ["decode", "predictRetail"], parallel: true, note: "Decode and price every VIN simultaneously" },
+      { step: 1, label: "For each VIN in parallel", apis: ["decode", "predictRetail"], parallel: true, note: "Decode specs and predict current market value simultaneously for every VIN" },
     ],
-    renders: "Portfolio value waterfall, stress scenario sliders, segment breakdown, at-risk loan list, LTV distribution shift chart",
+    renders: "Portfolio KPI summary (total loans, total collateral, avg LTV, underwater count), stress impact panel (new underwater loans, total value at risk, worst-hit segments), LTV distribution histogram (current vs stressed), collateral coverage waterfall, segment exposure table, portfolio donut chart, scenario comparison matrix, individual loan detail table",
+    useCases: [
+      { persona: "Auto Lender / Credit Risk Manager", desc: "Upload a portfolio of VINs and loan balances, run stress scenarios to find which loans flip underwater, and quantify total shortfall exposure before the risk materializes." },
+      { persona: "Portfolio Risk Analyst", desc: "Compare EV vs ICE vs Truck concentration risk side by side across multiple depreciation scenarios to identify segment-level vulnerabilities." },
+      { persona: "Loan Origination Officer", desc: "Quickly test a new batch of proposed loans against market-wide downturn scenarios to set appropriate LTV limits and reserve requirements." },
+      { persona: "Bank Examiner / Auditor", desc: "Generate a stress-tested snapshot of collateral coverage across a dealer floorplan or consumer auto portfolio for regulatory reporting." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — activates live VIN decode and pricing" },
+    ],
   },
   {
     id: "ev-collateral-risk",
