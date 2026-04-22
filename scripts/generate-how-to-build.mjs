@@ -703,7 +703,8 @@ const APPS = [
       { persona: "Bank Examiner / Auditor", desc: "Generate a stress-tested snapshot of collateral coverage across a dealer floorplan or consumer auto portfolio for regulatory reporting." },
     ],
     urlParams: [
-      { name: "api_key", desc: "Your MarketCheck API key — activates live VIN decode and pricing" },
+      { name: "api_key", desc: "Your MarketCheck API key — activates live VIN decode and pricing for each portfolio VIN" },
+      { name: "zip", desc: "Central ZIP code for localized market pricing context (e.g. 90210, 10001, 60601)" },
     ],
   },
   {

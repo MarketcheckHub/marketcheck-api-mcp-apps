@@ -760,8 +760,10 @@ function categorizeSegment(bodyType: string | undefined, fuelType: string | unde
 }
 
 async function loadData(scenario: Scenario, customPct: number): Promise<StressResult> {
+  if (_detectAppMode() === "demo") return generateMockStressResult(scenario, customPct);
   const vins = parseVINInput();
-  const result = await _callTool("stress-test-portfolio", { vins, scenario, customDropPct: customPct });
+  const urlZip = _getUrlParams().zip;
+  const result = await _callTool("stress-test-portfolio", { vins, scenario, customDropPct: customPct, zip: urlZip });
 
   if (result?.content?.[0]?.text) {
     try {
@@ -769,10 +771,10 @@ async function loadData(scenario: Scenario, customPct: number): Promise<StressRe
       if (parsed.portfolio && Array.isArray(parsed.portfolio)) {
         const loans: LoanEntry[] = parsed.portfolio.map((p: any) => {
           const decode = p.decode || {};
-          const predicted = p.price?.predicted_price ?? p.price?.price ?? p.loanAmount * 0.9;
+          const predicted = Math.max(1000, p.price?.predicted_price ?? p.price?.price ?? p.loanAmount * 0.9);
           const segment: Segment = categorizeSegment(decode.body_type, decode.fuel_type, decode.make);
           const multiplier = getStressMultiplier(segment, decode.fuel_type || "Gas", scenario, customPct);
-          const stressedValue = Math.round(predicted * multiplier);
+          const stressedValue = Math.max(1000, Math.round(predicted * multiplier));
           return {
             vin: p.vin, year: decode.year || 2022, make: decode.make || "Unknown",
             model: decode.model || "Unknown", segment,
