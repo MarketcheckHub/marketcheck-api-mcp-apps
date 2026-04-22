@@ -198,14 +198,39 @@ async function _fetchDirect(vins: string[], zip: string): Promise<RunListData> {
 }
 
 async function _callTool(args: { vins: string[]; zip: string }): Promise<RunListData | null> {
+  // 1. MCP mode (Claude Desktop, VS Code, etc.)
+  if (_safeApp && window.parent !== window) {
+    try {
+      const r = await _safeApp.callServerTool({ name: "auction-run-list-analyzer", arguments: args });
+      const parsed = JSON.parse(
+        typeof r === "string" ? r : r?.content?.[0]?.text ?? "{}"
+      );
+      if (parsed.results) return parsed as RunListData;
+    } catch (e) { console.warn("MCP failed:", e); }
+  }
+
+  // 2. Direct API mode (browser → api.marketcheck.com)
   const auth = _getAuth();
   if (auth.value) {
     try {
       return await _fetchDirect(args.vins, args.zip);
-    } catch (e) {
-      console.warn("Direct API failed:", e);
-    }
+    } catch (e) { console.warn("Direct API failed, trying proxy:", e); }
+
+    // 3. Proxy fallback
+    try {
+      const r = await fetch((_proxyBase()) + "/api/proxy/auction-run-list-analyzer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...args, _auth_mode: auth.mode, _auth_value: auth.value }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        if (d.results) return d as RunListData;
+      }
+    } catch {}
   }
+
+  // 4. Demo mode (null → app uses mock data)
   return null;
 }
 
