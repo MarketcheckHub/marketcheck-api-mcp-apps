@@ -230,18 +230,14 @@ function getLTVBadge(ltv: number): { label: string; color: string; bg: string } 
 
 // ── Mock Data ──────────────────────────────────────────────────────────
 const MOCK_PORTFOLIO = [
-  { vin: "5YJSA1E26MF100001", loanAmount: 38000, make: "Tesla", model: "Model 3", year: 2021, segment: "EV" as Segment, fuelType: "Electric", baseValue: 32500 },
-  { vin: "1FTFW1E85MFA00002", loanAmount: 42000, make: "Ford", model: "F-150", year: 2022, segment: "Truck" as Segment, fuelType: "Gas", baseValue: 44800 },
-  { vin: "4T1BF1FK5CU000003", loanAmount: 22500, make: "Toyota", model: "Camry", year: 2023, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 27200 },
-  { vin: "5YJXCDE20HF000004", loanAmount: 52000, make: "Tesla", model: "Model Y", year: 2023, segment: "EV" as Segment, fuelType: "Electric", baseValue: 48500 },
-  { vin: "WBAJB9C51KB000005", loanAmount: 45000, make: "BMW", model: "X5", year: 2022, segment: "Luxury" as Segment, fuelType: "Gas", baseValue: 48200 },
-  { vin: "1G1ZD5ST7LF000006", loanAmount: 18000, make: "Chevrolet", model: "Malibu", year: 2021, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 16800 },
-  { vin: "2HGFC2F59MH000007", loanAmount: 23000, make: "Honda", model: "Civic", year: 2022, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 25100 },
-  { vin: "1FTEW1EP2MK000008", loanAmount: 48000, make: "Ford", model: "F-150 Lightning", year: 2023, segment: "EV" as Segment, fuelType: "Electric", baseValue: 46200 },
-  { vin: "KNDCB3LC9L5000009", loanAmount: 28000, make: "Kia", model: "Sportage", year: 2022, segment: "SUV" as Segment, fuelType: "Gas", baseValue: 30500 },
-  { vin: "1FMCU9J94MU000010", loanAmount: 33000, make: "Ford", model: "Escape", year: 2021, segment: "SUV" as Segment, fuelType: "Gas", baseValue: 28900 },
-  { vin: "3GNAXUEV5NL000011", loanAmount: 30000, make: "Chevrolet", model: "Equinox", year: 2023, segment: "SUV" as Segment, fuelType: "Gas", baseValue: 32200 },
-  { vin: "5TDJZRFH8HS000012", loanAmount: 39000, make: "Toyota", model: "Highlander", year: 2022, segment: "SUV" as Segment, fuelType: "Hybrid", baseValue: 41500 },
+  { vin: "KNDCB3LC9L5359658", loanAmount: 20000, make: "Kia", model: "Forte", year: 2020, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 18500 },
+  { vin: "1HGCV1F34LA000001", loanAmount: 25000, make: "Honda", model: "Accord", year: 2020, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 27200 },
+  { vin: "5YJSA1E26MF000001", loanAmount: 52000, make: "Tesla", model: "Model S", year: 2021, segment: "EV" as Segment, fuelType: "Electric", baseValue: 48500 },
+  { vin: "1FTFW1E85MFA00001", loanAmount: 42000, make: "Ford", model: "F-150", year: 2021, segment: "Truck" as Segment, fuelType: "Gas", baseValue: 44800 },
+  { vin: "4T1BF1FK5CU500000", loanAmount: 22000, make: "Toyota", model: "Camry", year: 2021, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 24500 },
+  { vin: "WBAJB9C51KB500000", loanAmount: 45000, make: "BMW", model: "X5", year: 2019, segment: "Luxury" as Segment, fuelType: "Gas", baseValue: 48200 },
+  { vin: "2HGFC2F59MH500000", loanAmount: 21000, make: "Honda", model: "Civic", year: 2021, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 23100 },
+  { vin: "1FMCU9J94MU500000", loanAmount: 30000, make: "Ford", model: "Escape", year: 2021, segment: "SUV" as Segment, fuelType: "Gas", baseValue: 28900 },
 ];
 
 function generateMockStressResult(scenario: Scenario, customPct: number): StressResult {
@@ -778,18 +774,24 @@ async function loadData(scenario: Scenario, customPct: number): Promise<StressRe
       const parsed = JSON.parse(result.content[0].text);
       if (parsed.portfolio && Array.isArray(parsed.portfolio)) {
         const loans: LoanEntry[] = parsed.portfolio.map((p: any) => {
-          const decode = p.decode || {};
-          const predicted = Math.max(1000, p.price?.predicted_price ?? p.price?.price ?? p.loanAmount * 0.9);
-          const segment: Segment = categorizeSegment(decode.body_type, decode.fuel_type, decode.make);
-          const multiplier = getStressMultiplier(segment, decode.fuel_type || "Gas", scenario, customPct);
+          const raw = p.decode || {};
+          // neovin /specs response — fields at top level; some API versions nest under "specs"
+          const decode = raw.specs ?? raw;
+          const make = decode.make ?? decode.Make ?? "";
+          const model = decode.model ?? decode.Model ?? "";
+          const year = decode.year ?? decode.Year ?? 2022;
+          const bodyType = decode.body_type ?? decode.bodyType ?? decode.body ?? "";
+          const fuelType = decode.fuel_type ?? decode.fuelType ?? decode.fuel ?? "Gas";
+          const predicted = Math.max(1000, p.price?.predicted_price ?? p.price?.marketcheck_price ?? p.price?.price ?? p.loanAmount * 0.9);
+          const segment: Segment = categorizeSegment(bodyType, fuelType, make);
+          const multiplier = getStressMultiplier(segment, fuelType, scenario, customPct);
           const stressedValue = Math.max(1000, Math.round(predicted * multiplier));
           return {
-            vin: p.vin, year: decode.year || 2022, make: decode.make || "Unknown",
-            model: decode.model || "Unknown", segment,
+            vin: p.vin, year, make: make || "Unknown", model: model || "Unknown", segment,
             loanAmount: p.loanAmount, currentValue: Math.round(predicted),
             stressedValue, currentLTV: (p.loanAmount / predicted) * 100,
             stressedLTV: (p.loanAmount / stressedValue) * 100,
-            fuelType: decode.fuel_type || "Gas",
+            fuelType,
           };
         });
         return buildStressResult(loans, scenario, customPct);
