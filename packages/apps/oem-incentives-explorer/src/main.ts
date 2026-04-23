@@ -181,7 +181,11 @@ function _addSettingsBar(headerEl?: HTMLElement) {
     demo: { bg: "#92400e88", fg: "#fbbf24", label: "DEMO" },
   };
   const c = colors[mode];
-  bar.innerHTML = `<span style="padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:0.5px;background:${c.bg};color:${c.fg};border:1px solid ${c.fg}33;">${c.label}</span>`;
+  const badge = document.createElement("span");
+  badge.id = "_mode_badge";
+  badge.style.cssText = `padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:0.5px;background:${c.bg};color:${c.fg};border:1px solid ${c.fg}33;`;
+  badge.textContent = c.label;
+  bar.appendChild(badge);
   if (mode !== "mcp") {
     const gear = document.createElement("button");
     gear.innerHTML = "&#9881;";
@@ -1048,7 +1052,8 @@ let compareMakes: string[] = [];
 let selectedIncentiveIds: Set<string> = new Set();
 let calcMsrp = 35000;
 let isLoading = false;
-let apiErrorMessage: string | null = null;
+type ApiErrorKind = "empty" | "threw";
+let apiError: { kind: ApiErrorKind; message: string } | null = null;
 
 // ── Render ─────────────────────────────────────────────────────────────────────
 
@@ -1121,23 +1126,79 @@ function render(): void {
   `;
 
   _addSettingsBar(root.querySelector(".app-header") as HTMLElement);
+  renderApiErrorBanner();
   bindEvents();
 }
 
-function renderContent(): string {
-  let html = "";
-  if (apiErrorMessage) {
-    html += `
-      <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.4);border-radius:10px;padding:14px 18px;margin-bottom:16px;color:#fca5a5;">
-        <div style="font-weight:700;font-size:13px;margin-bottom:4px;">&#9888; API request failed</div>
-        <div style="font-size:12px;color:#fda4af;line-height:1.5;">${escapeHtml(apiErrorMessage)}</div>
-        <div style="font-size:11px;color:#f87171;margin-top:6px;">Common causes: invalid or expired API key, missing subscription tier for the incentives endpoint, or a temporary service outage. Double-check your key at <a href="https://developers.marketcheck.com" target="_blank" style="color:#fca5a5;text-decoration:underline;">developers.marketcheck.com</a>.</div>
-      </div>
-    `;
+function renderApiErrorBanner(): void {
+  document.getElementById("_api_error_banner")?.remove();
+  const badge = document.getElementById("_mode_badge");
+  if (!apiError) {
+    if (badge && _detectAppMode() === "live") {
+      badge.textContent = "LIVE";
+      badge.style.background = "#05966922";
+      badge.style.color = "#34d399";
+      badge.style.borderColor = "#34d39933";
+    }
+    return;
   }
+  if (badge) {
+    badge.textContent = "API ERROR";
+    badge.style.background = "#7f1d1d88";
+    badge.style.color = "#fca5a5";
+    badge.style.borderColor = "#fca5a566";
+  }
+
+  const banner = document.createElement("div");
+  banner.id = "_api_error_banner";
+  banner.style.cssText = "background:linear-gradient(135deg,#7f1d1d22,#ef444411);border:1px solid #ef444466;border-radius:10px;padding:14px 20px;margin-bottom:12px;display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;";
+
+  const textWrap = document.createElement("div");
+  textWrap.style.cssText = "flex:1;min-width:200px;";
+  const titleEl = document.createElement("div");
+  titleEl.style.cssText = "font-size:13px;font-weight:700;color:#fca5a5;margin-bottom:4px;";
+  titleEl.textContent = apiError.kind === "empty"
+    ? "⚠ Live API returned no offers"
+    : "⚠ Live API request failed";
+  const msgEl = document.createElement("div");
+  msgEl.style.cssText = "font-size:12px;color:#fda4af;line-height:1.5;margin-bottom:6px;";
+  msgEl.textContent = apiError.message;
+  const helpEl = document.createElement("div");
+  helpEl.style.cssText = "font-size:11px;color:#f87171;line-height:1.5;";
+  helpEl.appendChild(document.createTextNode(
+    "Common causes: invalid or expired API key, missing subscription tier for the incentives endpoint, or a temporary service outage. Check your key at "
+  ));
+  const link = document.createElement("a");
+  link.href = "https://developers.marketcheck.com";
+  link.target = "_blank";
+  link.style.cssText = "color:#fca5a5;text-decoration:underline;";
+  link.textContent = "developers.marketcheck.com";
+  helpEl.appendChild(link);
+  helpEl.appendChild(document.createTextNode("."));
+  textWrap.appendChild(titleEl);
+  textWrap.appendChild(msgEl);
+  textWrap.appendChild(helpEl);
+
+  const clearBtn = document.createElement("button");
+  clearBtn.textContent = "Clear Key";
+  clearBtn.style.cssText = "padding:8px 14px;border-radius:6px;border:1px solid #ef444466;background:transparent;color:#fca5a5;font-size:12px;font-weight:600;cursor:pointer;";
+  clearBtn.addEventListener("click", () => {
+    localStorage.removeItem("mc_api_key");
+    localStorage.removeItem("mc_access_token");
+    const url = new URL(location.href);
+    url.searchParams.delete("api_key");
+    location.href = url.toString();
+  });
+
+  banner.appendChild(textWrap);
+  banner.appendChild(clearBtn);
+  document.body.insertBefore(banner, document.body.firstChild);
+}
+
+function renderContent(): string {
   if (!currentResults) {
-    if (apiErrorMessage) return html;
-    return html + `
+    if (apiError) return "";
+    return `
       <div class="empty-state">
         <div class="icon">&#128269;</div>
         <h3>Search for OEM Incentives</h3>
@@ -1145,6 +1206,7 @@ function renderContent(): string {
       </div>
     `;
   }
+  let html = "";
 
   // Incentive cards grouped by make
   for (const result of currentResults.results) {
@@ -1472,7 +1534,7 @@ async function doSearch(): Promise<void> {
   if (!selectedMake || isLoading) return;
 
   isLoading = true;
-  apiErrorMessage = null;
+  apiError = null;
   selectedIncentiveIds.clear();
   render();
 
@@ -1509,7 +1571,10 @@ async function doSearch(): Promise<void> {
       currentResults = parsed;
     } else if (mode === "live") {
       // Live mode returned no usable data — surface this instead of silently showing mock.
-      apiErrorMessage = "The incentives API returned no offers for the requested brand(s). This can happen if your key lacks access to the /v2/search/car/incentive/oem endpoint, or the endpoint returned an empty listings array.";
+      apiError = {
+        kind: "empty",
+        message: "The incentives API returned no offers for the requested brand(s). This can happen if your key lacks access to the /v2/search/car/incentive/oem endpoint, or the endpoint returned an empty listings array.",
+      };
       currentResults = null;
     } else {
       // Demo / MCP — mock fallback is the intended behavior.
@@ -1517,7 +1582,10 @@ async function doSearch(): Promise<void> {
     }
   } catch (e) {
     if (mode === "live") {
-      apiErrorMessage = `Live API call failed: ${(e as Error)?.message || "unknown error"}.`;
+      apiError = {
+        kind: "threw",
+        message: `Live API call failed: ${(e as Error)?.message || "unknown error"}.`,
+      };
       currentResults = null;
     } else {
       currentResults = mockResults();
