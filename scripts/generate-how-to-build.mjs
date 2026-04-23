@@ -705,6 +705,8 @@ const APPS = [
     urlParams: [
       { name: "api_key", desc: "Your MarketCheck API key — activates live VIN decode and pricing for each portfolio VIN" },
       { name: "zip", desc: "Central ZIP code for localized market pricing context (e.g. 90210, 10001, 60601)" },
+      { name: "vins", desc: "Semicolon-separated VIN,LoanAmount pairs to pre-fill the portfolio (e.g. 5YJSA1E26MF100001,38000;1FTFW1E85MFA00002,42000)" },
+      { name: "scenario", desc: "Pre-select stress scenario: ev_drop_20 | trucks_drop_15 | market_wide_10 | custom" },
     ],
   },
   {

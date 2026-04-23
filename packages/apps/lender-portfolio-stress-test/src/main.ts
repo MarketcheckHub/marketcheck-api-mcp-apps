@@ -13,7 +13,7 @@ function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | n
 }
 function _detectAppMode(): "mcp" | "live" | "demo" { if (_getAuth().value) return "live"; if (_safeApp && window.parent !== window) return "mcp"; return "demo"; }
 function _isEmbedMode(): boolean { return new URLSearchParams(location.search).has("embed"); }
-function _getUrlParams(): Record<string, string> { const params = new URLSearchParams(location.search); const result: Record<string, string> = {}; for (const key of ["vin","zip","make","model","miles","state","dealer_id","ticker","price"]) { const v = params.get(key); if (v) result[key] = v; } return result; }
+function _getUrlParams(): Record<string, string> { const params = new URLSearchParams(location.search); const result: Record<string, string> = {}; for (const key of ["vin","vins","zip","make","model","miles","state","dealer_id","ticker","price","scenario"]) { const v = params.get(key); if (v) result[key] = v; } return result; }
 function _proxyBase(): string { return location.protocol.startsWith("http") ? "" : "http://localhost:3001"; }
 
 // ── Direct MarketCheck API Client (browser → api.marketcheck.com) ──────
@@ -48,13 +48,17 @@ async function _fetchDirect(args) {
     ? args.vins
     : (args.vins ?? "").split(",").map((v: string) => ({ vin: v.trim(), loanAmount: 0 })).filter((e: any) => e.vin);
   const portfolio = await Promise.all(vinEntries.map(async (entry) => {
-    const [decode, priceData] = await Promise.all([
-      _mcDecode(entry.vin),
-      _mcPredict({ vin: entry.vin, dealer_type: "franchise", zip: args.zip }),
-    ]);
-    return { vin: entry.vin, loanAmount: entry.loanAmount, decode, price: priceData };
+    try {
+      const [decode, priceData] = await Promise.all([
+        _mcDecode(entry.vin),
+        _mcPredict({ vin: entry.vin, dealer_type: "franchise", zip: args.zip }),
+      ]);
+      return { vin: entry.vin, loanAmount: entry.loanAmount, decode, price: priceData };
+    } catch {
+      return { vin: entry.vin, loanAmount: entry.loanAmount, decode: null, price: null };
+    }
   }));
-  return { portfolio };
+  return { portfolio: portfolio.filter(p => p.decode || p.loanAmount > 0) };
 }
 async function _callTool(toolName, args) {
   const auth = _getAuth();
@@ -295,14 +299,18 @@ function renderHeader(): string {
 }
 
 function renderVINInput(): string {
-  const defaultVINs = MOCK_PORTFOLIO.map(p => `${p.vin},${p.loanAmount}`).join("\n");
+  const urlParams = _getUrlParams();
+  let defaultVINs = MOCK_PORTFOLIO.map(p => `${p.vin},${p.loanAmount}`).join("\n");
+  if (urlParams.vins) {
+    defaultVINs = urlParams.vins.split(";").map(s => s.trim()).filter(Boolean).join("\n");
+  }
   return `<div style="background:${SURFACE};border-radius:10px;padding:16px;margin-bottom:20px;border:1px solid ${BORDER};">
     <h3 style="color:${TEXT};font-size:14px;margin-bottom:10px;">Portfolio VIN Input</h3>
     <div style="display:flex;gap:12px;">
       <div style="flex:1;">
         <label style="font-size:11px;color:${TEXT_SEC};display:block;margin-bottom:4px;">Enter VINs with loan amounts (one per line: VIN,LoanAmount)</label>
         <textarea id="vin-input" rows="6" placeholder="5YJSA1E26MF100001,38000&#10;1FTFW1E85MFA00002,42000&#10;..." style="width:100%;background:${BG};border:1px solid ${BORDER};border-radius:6px;padding:10px;color:${TEXT};font-family:monospace;font-size:11px;resize:vertical;box-sizing:border-box;">${defaultVINs}</textarea>
-        <div style="font-size:10px;color:${TEXT_MUTED};margin-top:4px;">Up to 20 VINs supported</div>
+        <div style="font-size:10px;color:${TEXT_MUTED};margin-top:4px;">Up to 20 VINs supported. Use URL param <code style="color:${CYAN};">vins=VIN1,Loan1;VIN2,Loan2</code> to deep-link.</div>
       </div>
     </div>
   </div>`;
@@ -841,6 +849,11 @@ function bindScenarioCards(): void {
 }
 
 function initApp(): void {
+  const urlParams = _getUrlParams();
+  if (urlParams.scenario && ["ev_drop_20","trucks_drop_15","market_wide_10","custom"].includes(urlParams.scenario)) {
+    currentScenario = urlParams.scenario as Scenario;
+  }
+
   document.body.style.cssText = `margin:0;padding:20px;background:${BG};color:${TEXT};font-family:system-ui,-apple-system,sans-serif;min-height:100vh;`;
 
   document.body.innerHTML = `
