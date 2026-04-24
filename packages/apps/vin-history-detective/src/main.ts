@@ -72,8 +72,23 @@ function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
 function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
 
 async function _fetchDirect(args: { vin: string; miles?: number | string; zip?: string }) {
-  const decode = await _mcDecode(args.vin);
-  const history = await _mcHistory(args.vin);
+  // Basic VIN length guard — API otherwise 400s on decode.
+  const vin = String(args.vin || "").trim().toUpperCase();
+  if (vin.length !== 17) {
+    return { error: "invalid_vin_length", message: `VIN must be 17 characters (got ${vin.length}).` };
+  }
+
+  let decode: any;
+  try {
+    decode = await _mcDecode(vin);
+  } catch (e: any) {
+    const msg = String(e?.message ?? "");
+    if (msg.includes("422") || msg.includes("400")) {
+      return { error: "invalid_vin", message: `'${vin}' could not be decoded. Double-check the VIN.` };
+    }
+    throw e;
+  }
+  const history = await _mcHistory(vin);
   // Price prediction requires miles AND (zip OR city+state). If caller didn't
   // provide miles, fall back to the most recent priced history entry's miles.
   let miles = args.miles ? Number(args.miles) : 0;
@@ -767,37 +782,53 @@ async function main() {
     </div>`;
 
     const mode = _detectAppMode();
-    let data: VinHistoryData;
+    let data: VinHistoryData | null = null;
     try {
       if (mode !== "demo") {
         const args = { vin, miles: miles || undefined, zip: zip || undefined };
         const response = await _callTool("trace-vin-history", args);
         const textContent = response?.content?.find((c: any) => c.type === "text");
         const raw = textContent?.text ? JSON.parse(textContent.text) : null;
-        if (raw && raw.decode) {
-          // Raw direct-fetch shape — transform it.
+        if (raw && raw.error) {
+          renderError(raw.message || "We couldn't trace this VIN.");
+        } else if (raw && raw.decode) {
           data = transformLive(raw, vin);
         } else if (raw && raw.vehicle) {
           // Proxy / MCP already transformed — use as-is.
           data = raw as VinHistoryData;
         } else {
-          throw new Error("Empty response");
+          renderError("No response from the MarketCheck API. Check your API key and try again.");
         }
       } else {
         await new Promise((r) => setTimeout(r, 900));
         data = getMockData(vin);
       }
-      renderResults(data);
+      if (data) renderResults(data);
     } catch (err: any) {
-      console.error("Trace failed, using mock:", err);
-      await new Promise((r) => setTimeout(r, 400));
-      data = getMockData(vin);
-      renderResults(data);
+      console.error("Trace failed:", err);
+      if (mode === "demo") {
+        await new Promise((r) => setTimeout(r, 400));
+        renderResults(getMockData(vin));
+      } else {
+        renderError(String(err?.message || "Something went wrong while tracing this VIN."));
+      }
     }
 
     traceBtn.disabled = false;
     traceBtn.textContent = "Trace History";
     traceBtn.style.opacity = "1";
+  }
+
+  function renderError(message: string) {
+    results.innerHTML = `
+      <div style="background:#1e293b;border:1px solid #ef444455;border-radius:10px;padding:24px;margin-bottom:16px;display:flex;gap:16px;align-items:flex-start;">
+        <div style="width:36px;height:36px;border-radius:50%;background:#ef444422;border:1px solid #ef444455;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:#ef4444;flex-shrink:0;">!</div>
+        <div>
+          <div style="font-size:15px;font-weight:700;color:#f8fafc;margin-bottom:4px;">VIN trace failed</div>
+          <div style="font-size:13px;color:#94a3b8;line-height:1.5;">${message}</div>
+          <div style="font-size:12px;color:#64748b;margin-top:10px;">Try one of the reference VINs from the developer guide: <code style="background:#0f172a;padding:2px 6px;border-radius:4px;color:#8b5cf6;">KNDCB3LC9L5359658</code>, <code style="background:#0f172a;padding:2px 6px;border-radius:4px;color:#8b5cf6;">1HGCV1F34LA000001</code>.</div>
+        </div>
+      </div>`;
   }
 
   function renderResults(data: VinHistoryData) {
