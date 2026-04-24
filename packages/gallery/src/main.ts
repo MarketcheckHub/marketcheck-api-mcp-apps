@@ -135,6 +135,7 @@ const APPS: AppDef[] = [
 const READY_APPS = new Set([
   "vin-market-report", "trade-in-estimator", "used-car-market-index",
   "car-search-app", "floor-plan-opportunity-scanner",
+  "dealer-intelligence-brief", "subprime-opportunity-finder",
   "chat-vercel-ai", "chat-copilotkit", "chat-assistant-ui", "chat-sdk-bot",
   "chat-chainlit", "chat-streamlit", "chat-langchain",
 ]);

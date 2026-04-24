@@ -37,21 +37,36 @@ export function registerFloorPlanOpportunityScanner(server: McpServer) {
         const radius = args.radius ?? 50;
         const minDom = args.min_dom ?? 60;
 
-        // Step 1: Search high-DOM listings with dealer facets and stats
-        const agedInventory = await client.searchActiveCars({
-          zip: args.zip,
-          radius,
-          min_dom: minDom,
-          rows: 50,
-          facets: "dealer_id,make",
-          stats: "price,miles,dom",
-          sort_by: "dom",
-          sort_order: "desc",
-        } as any);
+        // Step 1: Parallel — aged listings (burn calc) + total inventory counts (agedPct denominator)
+        const [agedResult, totalResult] = await Promise.allSettled([
+          client.searchActiveCars({
+            zip: args.zip,
+            radius,
+            min_dom: minDom,
+            rows: 50,
+            facets: "dealer_id,make",
+            stats: "price,miles,dom",
+            sort_by: "dom",
+            sort_order: "desc",
+          } as any),
+          client.searchActiveCars({ zip: args.zip, radius, rows: 1, facets: "dealer_id" } as any),
+        ]);
+        const agedInventory = agedResult.status === "fulfilled" ? agedResult.value : null;
+        const totalInventory = totalResult.status === "fulfilled" ? totalResult.value : null;
 
         const listings: any[] = agedInventory?.listings ?? [];
         const facets = agedInventory?.facets ?? {};
         const numFound = agedInventory?.num_found ?? listings.length;
+
+        // agedFacetMap: count of aged units per dealer (from aged query facets)
+        const agedFacets: any[] = facets?.dealer_id ?? [];
+        const agedFacetMap: Record<string, number> = {};
+        for (const f of agedFacets) agedFacetMap[String(f.item)] = f.count ?? 0;
+
+        // totalFacetMap: total lot size per dealer — correct denominator for agedPct
+        const totalFacets: any[] = (totalInventory as any)?.facets?.dealer_id ?? [];
+        const totalFacetMap: Record<string, number> = {};
+        for (const f of totalFacets) totalFacetMap[String(f.item)] = f.count ?? 0;
 
         // Build per-dealer aggregates
         const dealerMap: Record<string, {
@@ -59,29 +74,18 @@ export function registerFloorPlanOpportunityScanner(server: McpServer) {
           doms: number[]; prices: number[];
           allMakes: Record<string, number>;
           agedMakes: Record<string, number>;
-          totalUnits: number;
         }> = {};
-
-        const dealerFacets: any[] = facets?.dealer_id ?? [];
-        const dealerTotalMap: Record<string, number> = {};
-        for (const f of dealerFacets) {
-          dealerTotalMap[String(f.item)] = f.count ?? 0;
-        }
 
         for (const l of listings) {
           const did = l.dealer?.id ?? "unknown";
           const name = l.dealer?.name ?? did;
           const city = l.dealer?.city ?? "";
           const state = l.dealer?.state ?? "";
-          const dom = l.dom ?? 0;
+          const dom = l.dom ?? l.days_on_market ?? 0;
           const price = l.price ?? 0;
-          const make = l.make ?? "Other";
+          const make = l.build?.make ?? l.make ?? "Other";
           if (!dealerMap[did]) {
-            dealerMap[did] = {
-              name, city, state,
-              doms: [], prices: [], allMakes: {}, agedMakes: {},
-              totalUnits: dealerTotalMap[did] ?? 0,
-            };
+            dealerMap[did] = { name, city, state, doms: [], prices: [], allMakes: {}, agedMakes: {} };
           }
           dealerMap[did].doms.push(dom);
           if (price > 0) dealerMap[did].prices.push(price);
@@ -95,11 +99,13 @@ export function registerFloorPlanOpportunityScanner(server: McpServer) {
         const dealers = Object.entries(dealerMap).map(([did, d]) => {
           const agedDoms = d.doms.filter(dom => dom >= minDom);
           const veryAgedDoms = d.doms.filter(dom => dom >= 90);
-          const totalUnits = d.totalUnits > 0 ? d.totalUnits : d.doms.length;
+          // Use facet counts for accuracy (not sample-limited d.doms.length)
+          const agedUnits = agedFacetMap[did] ?? agedDoms.length;
+          // totalFacetMap gives true lot size — correct denominator for agedPct
+          const totalUnits = totalFacetMap[did] ?? agedUnits;
           const avgDom = d.doms.length > 0 ? Math.round(d.doms.reduce((s, v) => s + v, 0) / d.doms.length) : 0;
           const maxDom = d.doms.length > 0 ? Math.max(...d.doms) : 0;
           const avgPrice = d.prices.length > 0 ? Math.round(d.prices.reduce((s, v) => s + v, 0) / d.prices.length) : 0;
-          const agedUnits = agedDoms.length;
           const veryAgedUnits = veryAgedDoms.length;
           const agedPct = totalUnits > 0 ? Math.round((agedUnits / totalUnits) * 1000) / 10 : 0;
           const veryAgedPct = totalUnits > 0 ? Math.round((veryAgedUnits / totalUnits) * 1000) / 10 : 0;
@@ -152,7 +158,7 @@ export function registerFloorPlanOpportunityScanner(server: McpServer) {
         }
 
         // Build DOM distribution from all listings (aged only, 3-bucket — matches frontend)
-        const allDoms: number[] = listings.map((l: any) => l.dom ?? 0).filter((d: number) => d > 0);
+        const allDoms: number[] = listings.map((l: any) => l.dom ?? l.days_on_market ?? 0).filter((d: number) => d > 0);
         const marketAvgDom = allDoms.length > 0 ? Math.round(allDoms.reduce((s, v) => s + v, 0) / allDoms.length) : 0;
 
         const domDistribution = [
@@ -168,7 +174,7 @@ export function registerFloorPlanOpportunityScanner(server: McpServer) {
               text: JSON.stringify({
                 territory: `${args.zip} / ${radius}mi`,
                 totalListings: numFound,
-                agedListings: listings.filter((l: any) => (l.dom ?? 0) >= minDom).length,
+                agedListings: listings.filter((l: any) => (l.dom ?? l.days_on_market ?? 0) >= minDom).length,
                 dealers: dealers.slice(0, 20),
                 marketDemand,
                 domDistribution,

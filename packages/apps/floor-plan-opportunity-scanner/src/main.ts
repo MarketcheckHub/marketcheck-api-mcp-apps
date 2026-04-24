@@ -62,18 +62,23 @@ function _mcActive(p: Record<string, any>) { return _mcApi("/search/car/active",
 function _mcSold(p: Record<string, any>) { return _mcApi("/api/v1/sold-vehicles/summary", p); }
 
 async function _fetchDirect(args: { zip: string; radius: number; min_dom: number }) {
-  // Step 1: Search high-DOM listings in territory with dealer facets and stats
-  const aged = await _mcActive({
-    zip: args.zip,
-    radius: args.radius,
-    min_dom: args.min_dom,
-    rows: 50,
-    facets: "dealer_id,make",
-    stats: "price,miles,dom",
-    sort_by: "dom",
-    sort_order: "desc",
-  });
-  // Step 2: Fetch sold demand to identify which aged units have market demand (Enterprise API)
+  // Step 1: Parallel — aged listings (burn calc) + total inventory counts (agedPct denominator)
+  const [agedResult, totalResult] = await Promise.allSettled([
+    _mcActive({
+      zip: args.zip,
+      radius: args.radius,
+      min_dom: args.min_dom,
+      rows: 50,
+      facets: "dealer_id,make",
+      stats: "price,miles,dom",
+      sort_by: "dom",
+      sort_order: "desc",
+    }),
+    _mcActive({ zip: args.zip, radius: args.radius, rows: 1, facets: "dealer_id" }),
+  ]);
+  const aged = agedResult.status === "fulfilled" ? agedResult.value : null;
+  const total = totalResult.status === "fulfilled" ? totalResult.value : null;
+  // Step 2: Sold demand context (Enterprise API — graceful failure)
   let soldSummary: any = null;
   try {
     soldSummary = await _mcSold({
@@ -84,12 +89,16 @@ async function _fetchDirect(args: { zip: string; radius: number; min_dom: number
       inventory_type: "Used",
     });
   } catch { /* Enterprise API — not always available */ }
-  return { aged, soldSummary };
+  return { aged, total, soldSummary };
 }
 
 async function _callTool(toolName: string, args: Record<string, any>) {
   const auth = _getAuth();
   if (auth.value) {
+    try {
+      const data = await _fetchDirect(args as any);
+      if (data) return { content: [{ type: "text", text: JSON.stringify(data) }] };
+    } catch {}
     try {
       const r = await fetch((_proxyBase()) + "/api/proxy/" + toolName, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -97,12 +106,8 @@ async function _callTool(toolName: string, args: Record<string, any>) {
       });
       if (r.ok) { const d = await r.json(); return { content: [{ type: "text", text: JSON.stringify(d) }] }; }
     } catch {}
-    try {
-      const data = await _fetchDirect(args as any);
-      if (data) return { content: [{ type: "text", text: JSON.stringify(data) }] };
-    } catch {}
   }
-  if (_safeApp) {
+  if (_safeApp && window.parent !== window) {
     try { return await _safeApp.callServerTool({ name: toolName, arguments: args }); } catch {}
   }
   return null;
@@ -328,14 +333,21 @@ function generateMockData(): ScanData {
 // ── Parse API response into ScanData ──────────────────────────────────
 function parseApiResponse(raw: any, args: { zip: string; radius: number; min_dom: number }): ScanData {
   const aged = raw?.aged ?? raw;
+  const total = raw?.total;
   const soldSummary = raw?.soldSummary;
   const listings: any[] = aged?.listings ?? [];
   const facets = aged?.facets ?? {};
   const numFound = aged?.num_found ?? listings.length;
 
-  const dealerFacets: any[] = facets?.dealer_id ?? [];
-  const dealerTotalMap: Record<string, number> = {};
-  for (const f of dealerFacets) dealerTotalMap[String(f.item)] = f.count ?? 0;
+  // agedFacetMap: count of aged units per dealer (from aged query facets)
+  const agedFacets: any[] = facets?.dealer_id ?? [];
+  const agedFacetMap: Record<string, number> = {};
+  for (const f of agedFacets) agedFacetMap[String(f.item)] = f.count ?? 0;
+
+  // totalFacetMap: total lot size per dealer — used as denominator for agedPct
+  const totalFacets: any[] = total?.facets?.dealer_id ?? [];
+  const totalFacetMap: Record<string, number> = {};
+  for (const f of totalFacets) totalFacetMap[String(f.item)] = f.count ?? 0;
 
   const dealerMap: Record<string, {
     name: string; city: string; state: string;
@@ -351,9 +363,9 @@ function parseApiResponse(raw: any, args: { zip: string; radius: number; min_dom
     const name = l.dealer?.name ?? did;
     const city = l.dealer?.city ?? "";
     const state = l.dealer?.state ?? "";
-    const dom = l.dom ?? 0;
+    const dom = l.dom ?? l.days_on_market ?? 0;
     const price = l.price ?? 0;
-    const make = l.make ?? "Other";
+    const make = l.build?.make ?? l.make ?? "Other";
     if (!dealerMap[did]) dealerMap[did] = { name, city, state, doms: [], prices: [], allMakes: {}, agedMakes: {} };
     dealerMap[did].doms.push(dom);
     if (price > 0) dealerMap[did].prices.push(price);
@@ -367,11 +379,13 @@ function parseApiResponse(raw: any, args: { zip: string; radius: number; min_dom
   const dealers: DealerOpportunity[] = Object.entries(dealerMap).map(([did, d]) => {
     const agedDoms = d.doms.filter(dom => dom >= minDom);
     const veryAgedDoms = d.doms.filter(dom => dom >= 90);
-    const totalUnits = dealerTotalMap[did] ?? d.doms.length;
+    // Use facet counts for accuracy (not sample-limited d.doms.length)
+    const agedUnits = agedFacetMap[did] ?? agedDoms.length;
+    // totalFacetMap gives true lot size — correct denominator for agedPct
+    const totalUnits = totalFacetMap[did] ?? agedUnits;
     const avgDom = d.doms.length > 0 ? Math.round(d.doms.reduce((s, v) => s + v, 0) / d.doms.length) : 0;
     const maxDom = d.doms.length > 0 ? Math.max(...d.doms) : 0;
     const avgPrice = d.prices.length > 0 ? Math.round(d.prices.reduce((s, v) => s + v, 0) / d.prices.length) : 0;
-    const agedUnits = agedDoms.length;
     const veryAgedUnits = veryAgedDoms.length;
     const agedPct = totalUnits > 0 ? Math.round((agedUnits / totalUnits) * 1000) / 10 : 0;
     const veryAgedPct = totalUnits > 0 ? Math.round((veryAgedUnits / totalUnits) * 1000) / 10 : 0;
@@ -395,7 +409,7 @@ function parseApiResponse(raw: any, args: { zip: string; radius: number; min_dom
 
   dealers.sort((a, b) => b.estimatedMonthlyBurn - a.estimatedMonthlyBurn);
 
-  const allDoms: number[] = listings.map((l: any) => l.dom ?? 0).filter((d: number) => d > 0);
+  const allDoms: number[] = listings.map((l: any) => l.dom ?? l.days_on_market ?? 0).filter((d: number) => d > 0);
   const marketAvgDom = allDoms.length > 0 ? Math.round(allDoms.reduce((s, v) => s + v, 0) / allDoms.length) : 0;
 
   const marketDemand: Array<{ make: string; soldCount: number }> = (soldSummary?.rankings ?? [])
@@ -405,7 +419,7 @@ function parseApiResponse(raw: any, args: { zip: string; radius: number; min_dom
   return {
     territory: `${args.zip} / ${args.radius}mi`,
     totalListings: numFound,
-    agedListings: listings.filter((l: any) => (l.dom ?? 0) >= minDom).length,
+    agedListings: listings.filter((l: any) => (l.dom ?? l.days_on_market ?? 0) >= minDom).length,
     dealers,
     marketDemand,
     domDistribution: [
@@ -657,6 +671,14 @@ function renderDashboard(data: ScanData) {
   rightBar.appendChild(backBtn);
   topBar.appendChild(rightBar);
   wrap.appendChild(topBar);
+
+  // Demo banner in dashboard view
+  if (_detectAppMode() === "demo" && !_isEmbedMode()) {
+    const db = document.createElement("div");
+    db.style.cssText = "background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:10px 20px;margin:12px 24px 0;";
+    db.innerHTML = `<span style="font-size:12px;font-weight:700;color:#b45309;">&#9888; Demo Mode</span> <span style="font-size:12px;color:#92400e;">— Sample data. Enter your API key via &#9881; to scan real inventory.</span>`;
+    wrap.appendChild(db);
+  }
 
   // ── Main content ───────────────────────────────────────────────────
   const content = el("div", { style: "flex:1;padding:20px 24px;" });
