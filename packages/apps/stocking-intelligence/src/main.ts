@@ -651,7 +651,8 @@ function renderDealerDashboard(result: DealerResult): string {
   }
 
   // Aging alerts from active inventory
-  const aging = listings.filter(l => (l.days_on_market || 0) > 45).sort((a, b) => (b.days_on_market || 0) - (a.days_on_market || 0));
+  const getDom = (l: any) => (l.dom ?? l.days_on_market ?? 0);
+  const aging = listings.filter(l => getDom(l) > 45).sort((a, b) => getDom(b) - getDom(a));
   let agingHtml = "";
   if (aging.length) {
     const thS = `padding:8px 12px;font-weight:600;color:#94a3b8;border-bottom:2px solid #334155;font-size:12px`;
@@ -661,7 +662,7 @@ function renderDealerDashboard(result: DealerResult): string {
         <td style="padding:8px 12px;border-bottom:1px solid #1e293b;color:#e2e8f0;font-weight:600">${l.year || ""} ${l.make || ""} ${l.model || ""} ${l.trim || ""}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #1e293b;color:#e2e8f0;text-align:right">${l.price ? fmtDollar(l.price) : "—"}</td>
         <td style="padding:8px 12px;border-bottom:1px solid #1e293b;color:#e2e8f0;text-align:right">${l.miles ? l.miles.toLocaleString() : "—"}</td>
-        <td style="padding:8px 12px;border-bottom:1px solid #1e293b;color:#fca5a5;text-align:right;font-weight:700">${l.days_on_market || 0}d</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #1e293b;color:#fca5a5;text-align:right;font-weight:700">${getDom(l)}d</td>
         <td style="padding:8px 12px;border-bottom:1px solid #1e293b;color:#94a3b8;font-family:monospace;font-size:11px">${l.vin || "—"}</td>
       </tr>`;
     }
@@ -834,13 +835,14 @@ async function main() {
     _db.querySelector("#_banner_key").addEventListener("keydown", (e) => { if (e.key === "Enter") _db.querySelector("#_banner_save").click(); });
   }
 
-  // ── State ──
-  let currentMode: "vin-list" | "dealer-stock" = "vin-list";
+  // ── State (with URL param deep-linking) ──
+  const urlParams = _getUrlParams();
+  let currentMode: "vin-list" | "dealer-stock" = urlParams.dealer_id ? "dealer-stock" : "vin-list";
   let dealerResult: DealerResult | null = null;
   let vinResults: VinResult[] | null = null;
-  let savedVinText = "";
-  let savedZip = "";
-  let savedDealerInput = "";
+  let savedVinText = urlParams.vin || "";
+  let savedZip = urlParams.zip || "";
+  let savedDealerInput = urlParams.dealer_id || "";
   let savedCondition = "";
   let savedRows = "50";
 
@@ -985,15 +987,23 @@ async function main() {
             return;
           }
           const listings = resp.listings;
+          // Guard: API silently ignores an unknown dealer_id/seller_domain and returns
+          // mixed-dealer default results. If the response spans >1 dealer, the filter didn't match.
+          const uniqueDealerIds = new Set(listings.map((l: any) => l.dealer?.id).filter(Boolean));
+          if (uniqueDealerIds.size > 1) {
+            if (statusEl) statusEl.innerHTML = '<span style="color:#fca5a5">No inventory found for "' + val + '". Check the Dealer ID or domain spelling.</span>';
+            if (loadBtn) { loadBtn.disabled = false; loadBtn.style.opacity = "1"; }
+            return;
+          }
           const numFound = resp.num_found || listings.length;
           const dName = listings[0]?.dealer?.name || val;
-          // Use stats from API response (stats.dom.avg) for accurate avg DOM
-          const domStats = resp.stats?.dom;
-          const priceStats = resp.stats?.price;
-          const milesStats = resp.stats?.miles;
-          const avgPrice = Math.round(priceStats?.avg || 0);
-          const avgMiles = Math.round(milesStats?.avg || 0);
-          const avgDom = Math.round(domStats?.avg || 0);
+          // Use stats from API response — support both .dom/.days_on_market and .avg/.mean
+          const domStats = resp.stats?.dom ?? resp.stats?.days_on_market ?? {};
+          const priceStats = resp.stats?.price ?? {};
+          const milesStats = resp.stats?.miles ?? {};
+          const avgPrice = Math.round(priceStats.avg ?? priceStats.mean ?? 0);
+          const avgMiles = Math.round(milesStats.avg ?? milesStats.mean ?? 0);
+          const avgDom = Math.round(domStats.avg ?? domStats.mean ?? 0);
 
           // Fetch regional sold data for fast/slow mover analysis
           const dealerState = listings[0]?.dealer?.state || listings[0]?.location?.state || "TX";
@@ -1017,6 +1027,15 @@ async function main() {
 
   // ── Render immediately — no data pre-loaded ──
   render();
+
+  // ── Auto-submit when URL params triggered a mode (live only) ──
+  if (_detectAppMode() !== "demo") {
+    if (urlParams.vin) {
+      setTimeout(() => (document.getElementById("vin-check-btn") as HTMLButtonElement)?.click(), 50);
+    } else if (urlParams.dealer_id) {
+      setTimeout(() => (document.getElementById("dealer-load-btn") as HTMLButtonElement)?.click(), 50);
+    }
+  }
 }
 
 main();
