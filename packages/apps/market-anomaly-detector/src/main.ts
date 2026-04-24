@@ -357,10 +357,22 @@ function renderHeader(): string {
 }
 
 function renderSearchForm(defaults: { make: string; model: string; year: string; state: string; sensitivity: number }): string {
-  const makeOptions = Object.keys(MAKES_MODELS).map(m =>
+  // If the caller passed a make that isn't in our curated dropdown (e.g. via
+  // a URL param like ?make=Lucid), prepend it as a custom option so the
+  // selection sticks instead of silently snapping to the first entry.
+  const makeList = Object.keys(MAKES_MODELS).includes(defaults.make)
+    ? Object.keys(MAKES_MODELS)
+    : [defaults.make, ...Object.keys(MAKES_MODELS)];
+  const makeOptions = makeList.map(m =>
     `<option value="${m}" ${m === defaults.make ? "selected" : ""}>${m}</option>`
   ).join("");
-  const modelOptions = (MAKES_MODELS[defaults.make] || []).map(m =>
+  // Same story for model: curated list for the selected make, plus the
+  // caller's override if it isn't already present.
+  const baseModels = MAKES_MODELS[defaults.make] ?? [];
+  const modelList = defaults.model && !baseModels.includes(defaults.model)
+    ? [defaults.model, ...baseModels]
+    : baseModels;
+  const modelOptions = modelList.map(m =>
     `<option value="${m}" ${m === defaults.model ? "selected" : ""}>${m}</option>`
   ).join("");
   const yearOptions = Array.from({ length: 8 }, (_, i) => 2025 - i).map(y =>
