@@ -5,7 +5,9 @@
 import { App } from "@modelcontextprotocol/ext-apps";
 
 let _safeApp: any = null;
-try { _safeApp = new App({ name: "deal-evaluator" }); } catch {}
+if (typeof window !== "undefined" && window.parent !== window) {
+  try { _safeApp = new App({ name: "deal-evaluator" }); } catch {}
+}
 
 // ── Dual-Mode Data Provider ────────────────────────────────────────────
 function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | null } {
@@ -57,14 +59,17 @@ async function _mcApi(path, params = {}) {
   const headers = {};
   if (auth.mode === "oauth_token") headers["Authorization"] = "Bearer " + auth.value;
   const res = await fetch(url.toString(), { headers });
-  if (!res.ok) throw new Error("MC API " + res.status);
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`MC API ${res.status} @ ${path}${body ? ": " + body.slice(0, 200) : ""}`);
+  }
   return res.json();
 }
 function _mcDecode(vin) { return _mcApi("/decode/car/neovin/" + vin + "/specs"); }
 function _mcPredict(p) { return _mcApi("/predict/car/us/marketcheck_price/comparables", p); }
 function _mcActive(p) { return _mcApi("/search/car/active", p); }
 function _mcRecent(p) { return _mcApi("/search/car/recents", p); }
-function _mcHistory(vin) { return _mcApi("/history/car/" + vin); }
+function _mcHistory(vin) { return _mcApi("/history/car/" + vin, { sort_order: "desc" }); }
 function _mcSold(p) { return _mcApi("/api/v1/sold-vehicles/summary", p); }
 function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;delete q.oem;} return _mcApi("/search/car/incentive/oem", q); }
 function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
@@ -72,9 +77,143 @@ function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
 
 async function _fetchDirect(args) {
   const decode = await _mcDecode(args.vin);
-  const [prediction, history] = await Promise.all([_mcPredict({...args,dealer_type:"franchise"}), _mcHistory(args.vin)]);
-  const activeComps = await _mcActive({make:decode?.make,model:decode?.model,year:decode?.year?`${decode.year-1}-${decode.year+1}`:undefined,zip:args.zip,radius:75,stats:"price,miles,dom",rows:10,sort_by:"price",sort_order:"asc"});
-  return {decode,prediction,activeComps,history};
+  // Whitelist params per endpoint — the MarketCheck API rejects unknown query params with 400.
+  // Client-only fields like `askingPrice` must not be forwarded upstream.
+  const predictParams: Record<string, any> = { vin: args.vin, dealer_type: "franchise" };
+  if (args.miles) predictParams.miles = args.miles;
+  if (args.zip) predictParams.zip = args.zip;
+  const [prediction, history] = await Promise.all([_mcPredict(predictParams), _mcHistory(args.vin)]);
+  const activeComps = await _mcActive({ make: decode?.make, model: decode?.model, year: decode?.year ? `${decode.year - 1}-${decode.year + 1}` : undefined, zip: args.zip, radius: 75, stats: "price,miles,dom", rows: 10, sort_by: "price", sort_order: "asc" });
+  return { decode, prediction, activeComps, history };
+}
+
+// Maps raw MarketCheck API responses to the EvalResult shape the renderer expects.
+// The MCP server normally does this transform server-side; in direct-API mode we do it here.
+function _transformToEvalResult(raw: any, args: Record<string, any>): any {
+  const { decode = {}, prediction = {}, activeComps = {}, history } = raw ?? {};
+  const listings: any[] = Array.isArray(activeComps?.listings) ? activeComps.listings : [];
+  const priceStats = activeComps?.stats?.price ?? {};
+  const milesStats = activeComps?.stats?.miles ?? {};
+  const domStats = activeComps?.stats?.dom ?? activeComps?.stats?.days_on_market ?? {};
+
+  const histArr: any[] = Array.isArray(history) ? history : (history?.listings ?? []);
+  const current = histArr[0] ?? null;
+
+  const predictedPrice = prediction?.marketcheck_price ?? prediction?.price ?? prediction?.predicted_price ?? 0;
+  const askingPrice = Number(args.askingPrice) || current?.price || predictedPrice || decode?.msrp || 0;
+  const miles = Number(args.miles) || current?.miles || 0;
+
+  const pricesSorted = listings.map(l => Number(l.price) || 0).filter(p => p > 0).sort((a, b) => a - b);
+  let percentile = 50;
+  if (pricesSorted.length > 0 && askingPrice > 0) {
+    const below = pricesSorted.filter(p => p <= askingPrice).length;
+    percentile = Math.round((below / pricesSorted.length) * 100);
+  }
+
+  const marketStats = {
+    count: activeComps?.num_found ?? listings.length,
+    medianPrice: priceStats.median ?? priceStats.mean ?? priceStats.avg ?? 0,
+    avgPrice: priceStats.avg ?? priceStats.mean ?? 0,
+    minPrice: priceStats.min ?? 0,
+    maxPrice: priceStats.max ?? 0,
+    avgMiles: milesStats.avg ?? milesStats.mean ?? 0,
+    avgDom: domStats.avg ?? domStats.mean ?? 0,
+    priceStd: priceStats.stddev ?? priceStats.std ?? 0,
+  };
+
+  const alternatives = listings
+    .filter(l => (l.vin ?? l.vehicle?.vin) !== args.vin)
+    .slice(0, 8)
+    .map(l => {
+      const build = l.build ?? l.vehicle ?? {};
+      const dealer = l.dealer ?? {};
+      const price = Number(l.price) || 0;
+      return {
+        year: build.year ?? decode?.year ?? 0,
+        make: build.make ?? decode?.make ?? "",
+        model: build.model ?? decode?.model ?? "",
+        trim: build.trim ?? "",
+        price,
+        miles: Number(l.miles) || 0,
+        city: dealer.city ?? l.city ?? "",
+        state: dealer.state ?? l.state ?? "",
+        dom: l.dom ?? l.days_on_market ?? 0,
+        dealerName: dealer.name ?? l.dealer_name ?? "",
+        vdpUrl: l.vdp_url ?? l.vdpUrl ?? "#",
+        isBelowPredicted: price > 0 && predictedPrice > 0 && price < predictedPrice,
+      };
+    });
+
+  // History entries from MarketCheck expose both Unix-seconds (`last_seen_at`) and
+  // ISO-string (`last_seen_at_date`) variants. Prefer the string variant when available.
+  const toIsoDate = (iso: unknown, unixSecs: unknown): string => {
+    if (typeof iso === "string" && iso) return iso;
+    if (typeof unixSecs === "number") {
+      const ms = unixSecs < 10_000_000_000 ? unixSecs * 1000 : unixSecs;
+      return new Date(ms).toISOString();
+    }
+    return "";
+  };
+
+  const priceHistory = histArr
+    .slice(0, 12)
+    .map((h: any) => ({
+      date: toIsoDate(h.last_seen_at_date ?? h.scraped_at_date ?? h.first_seen_at_date,
+                       h.last_seen_at ?? h.scraped_at ?? h.first_seen_at),
+      price: Number(h.price) || 0,
+      dealer: h.dealer?.name ?? h.dealer?.dealer_name ?? h.dealer_name ?? h.seller_name ?? "",
+    }))
+    .filter(h => h.date && h.price > 0)
+    .reverse();
+
+  let currentDom = current?.dom ?? current?.days_on_market ?? 0;
+  if (!currentDom && current?.last_seen_at && current?.first_seen_at) {
+    const diff = (Number(current.last_seen_at) - Number(current.first_seen_at));
+    if (diff > 0) currentDom = Math.round(diff / 86400); // unix seconds → days
+  }
+  const leveragePoints: any[] = [];
+  if (currentDom >= 30) {
+    leveragePoints.push({ icon: "clock", label: "High Days on Market", detail: `This car has been listed for ${currentDom} days — dealer is motivated to sell.` });
+  }
+  if (priceHistory.length >= 2) {
+    const first = priceHistory[0].price;
+    const last = priceHistory[priceHistory.length - 1].price;
+    if (last < first) {
+      leveragePoints.push({ icon: "chart-down", label: "Price Dropped", detail: `Price has dropped $${(first - last).toLocaleString()} since first listed. Momentum is in your favor.` });
+    }
+  }
+  if (marketStats.count >= 50) {
+    leveragePoints.push({ icon: "inventory", label: "High Local Inventory", detail: `${marketStats.count} similar vehicles available nearby. Dealer has competition.` });
+  }
+  if (marketStats.avgMiles > 0 && miles > 0 && miles < marketStats.avgMiles) {
+    leveragePoints.push({ icon: "miles", label: "Below-Average Mileage", detail: `This car has fewer miles than the market average (${Math.round(miles / 1000)}K vs ${Math.round(marketStats.avgMiles / 1000)}K avg).` });
+  }
+
+  return {
+    vehicle: {
+      vin: args.vin ?? decode?.vin ?? "",
+      year: decode?.year ?? 0,
+      make: decode?.make ?? "",
+      model: decode?.model ?? "",
+      trim: decode?.trim ?? "",
+      bodyType: decode?.body_type ?? decode?.bodyType ?? "",
+      engine: decode?.engine ?? decode?.powertrain?.engine ?? "",
+      transmission: decode?.transmission ?? "",
+      drivetrain: decode?.drivetrain ?? decode?.driven_wheels ?? "",
+      fuelType: decode?.fuel_type ?? decode?.fuelType ?? "",
+      msrp: decode?.msrp ?? 0,
+    },
+    askingPrice,
+    miles,
+    predictedPrice,
+    percentile,
+    marketStats,
+    alternatives,
+    priceHistory,
+    leveragePoints,
+    dealerName: current?.dealer?.name ?? current?.dealer?.dealer_name ?? current?.dealer_name ?? current?.seller_name ?? "",
+    dom: currentDom,
+  };
 }
 
 async function _callTool(toolName, args) {
@@ -86,8 +225,11 @@ async function _callTool(toolName, args) {
   const auth = _getAuth();
   if (auth.value) {
     try {
-      const data = await _fetchDirect(args);
-      if (data) return { content: [{ type: "text", text: JSON.stringify(data) }] };
+      const raw = await _fetchDirect(args);
+      if (raw) {
+        const transformed = _transformToEvalResult(raw, args);
+        return { content: [{ type: "text", text: JSON.stringify(transformed) }] };
+      }
     } catch (e) { console.warn("Direct API failed, trying proxy:", e); }
     // 3. Proxy fallback
     try {
@@ -574,11 +716,18 @@ async function main() {
     return input;
   }
 
+  const urlParams = _getUrlParams();
+  const urlSearch = new URLSearchParams(location.search);
+  const urlAsking = urlSearch.get("askingPrice") ?? urlSearch.get("asking_price");
+
   const vinInput = makeField("VIN", "Enter 17-character VIN", { width: "240px" });
-  vinInput.value = "KNDCB3LC9L5359658";
+  vinInput.value = urlParams.vin || "KNDCB3LC9L5359658";
   const priceInput = makeField("Asking Price (optional)", "$0", { width: "140px", type: "number" });
+  if (urlAsking) priceInput.value = urlAsking;
   const milesInput = makeField("Mileage (optional)", "e.g. 35000", { width: "140px", type: "number" });
+  if (urlParams.miles) milesInput.value = urlParams.miles;
   const zipInput = makeField("ZIP Code (optional)", "e.g. 80202", { width: "120px" });
+  if (urlParams.zip) zipInput.value = urlParams.zip;
 
   const evalBtn = document.createElement("button");
   evalBtn.textContent = "Evaluate";
@@ -611,38 +760,39 @@ async function main() {
       Analyzing market data for ${vin}...
     </div>`;
 
-    let data: EvalResult;
+    let data: EvalResult | null = null;
+
+    const fallbackToMock = () => getMockData(
+      vin,
+      priceInput.value ? Number(priceInput.value) : undefined,
+      milesInput.value ? Number(milesInput.value) : undefined,
+    );
 
     try {
-      if (serverAvailable) {
-        const args: Record<string, unknown> = { vin };
-        if (priceInput.value) args.askingPrice = Number(priceInput.value);
-        if (milesInput.value) args.miles = Number(milesInput.value);
-        if (zipInput.value) args.zip = zipInput.value;
+      const args: Record<string, unknown> = { vin };
+      if (priceInput.value) args.askingPrice = Number(priceInput.value);
+      if (milesInput.value) args.miles = Number(milesInput.value);
+      if (zipInput.value) args.zip = zipInput.value;
 
-        const response = await _callTool("evaluate-deal", args);
+      // _callTool handles the fallback chain: MCP → direct API → proxy → null.
+      // null means "no auth available" (demo mode).
+      const response = await _callTool("evaluate-deal", args);
+      if (response?.content) {
         const textContent = response.content.find((c: any) => c.type === "text");
-        data = JSON.parse(textContent?.text ?? "{}");
-      } else {
-        // Use mock data
-        await new Promise(r => setTimeout(r, 800));
-        data = getMockData(
-          vin,
-          priceInput.value ? Number(priceInput.value) : undefined,
-          milesInput.value ? Number(milesInput.value) : undefined,
-        );
+        const parsed = JSON.parse(textContent?.text ?? "{}");
+        data = parsed?.vehicle ? parsed : null;
+      }
+
+      if (!data) {
+        await new Promise(r => setTimeout(r, 600));
+        data = fallbackToMock();
       }
 
       renderResults(data);
     } catch (err: any) {
-      console.error("Evaluation failed, falling back to mock:", err);
+      console.warn("Evaluation threw, falling back to mock:", err);
       await new Promise(r => setTimeout(r, 400));
-      data = getMockData(
-        vin,
-        priceInput.value ? Number(priceInput.value) : undefined,
-        milesInput.value ? Number(milesInput.value) : undefined,
-      );
-      renderResults(data);
+      renderResults(fallbackToMock());
     }
 
     evalBtn.disabled = false;
@@ -884,7 +1034,7 @@ async function main() {
           ${data.priceHistory.map((h, i) => {
             const prevPrice = i > 0 ? data.priceHistory[i - 1].price : h.price;
             const diff = h.price - prevPrice;
-            const diffStr = i === 0 ? "" : ` <span style="color:${diff <= 0 ? "#10b981" : "#ef4444"};font-size:11px;">(${diff <= 0 ? "" : "+"}${fmtCurrency(diff)})</span>`;
+            const diffStr = i === 0 ? "" : ` <span style="color:${diff <= 0 ? "#10b981" : "#ef4444"};font-size:11px;">(${diff < 0 ? "-" : "+"}${fmtCurrency(Math.abs(diff))})</span>`;
             return `<tr style="border-bottom:1px solid #1e293b;">
               <td style="padding:6px 10px;color:#e2e8f0;">${new Date(h.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</td>
               <td style="padding:6px 10px;color:#e2e8f0;font-weight:600;">${fmtCurrency(h.price)}${diffStr}</td>
@@ -921,6 +1071,10 @@ async function main() {
     ::-webkit-scrollbar-thumb:hover { background: #475569; }
   `;
   document.head.appendChild(style);
+
+  if (urlParams.vin) {
+    setTimeout(() => evalBtn.click(), 100);
+  }
 }
 
 main();
