@@ -84,7 +84,6 @@ async function _fetchDirect(args) {
     const listing = listingSearch?.listings?.[0];
     const miles =
       listing?.miles ??
-      listing?.dom ??
       (decode?.year ? Math.max(5000, (2026 - Number(decode.year)) * 12000) : 30000);
     const prediction = await _mcPredict({
       vin,
@@ -152,7 +151,7 @@ function buildLiveResult(
         : d.exterior_color?.name || d.exterior_color?.base || "";
     // Decode has no odometer — use prediction.miles if present, else median from comparables, else default.
     const compMiles = (p.comparables?.cars || p.comparables?.listings || [])
-      .map((c: any) => c.miles ?? c.dom ?? null)
+      .map((c: any) => c.miles ?? null)
       .filter((n: any) => typeof n === "number");
     const medianCompMiles = compMiles.length
       ? compMiles.sort((a: number, b: number) => a - b)[Math.floor(compMiles.length / 2)]

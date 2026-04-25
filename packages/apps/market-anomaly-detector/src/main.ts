@@ -809,7 +809,7 @@ async function loadData(make: string, model: string, year: string, state: string
     const build = raw.build ?? {};
     const dealer = raw.dealer ?? {};
     const price = Number(raw.price) || 0;
-    const miles = Number(raw.miles ?? raw.days_on_market ?? 0) || 0;
+    const miles = Number(raw.miles ?? 0) || 0;
     const dom = Number(raw.dom ?? raw.days_on_market ?? 0) || 0;
     // Prefer per-listing prediction, then the API's own market mean, then the
     // listing's own price (so discount% = 0 instead of a random number).
