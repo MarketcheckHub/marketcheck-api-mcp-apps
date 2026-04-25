@@ -462,7 +462,19 @@ const APPS = [
     tagline: "Know what to buy at auction",
     segment: "Dealer",
     toolName: "stocking-intelligence",
-    description: "Auction stocking guide powered by sold volume data. Shows which make/model combinations are selling fastest and at what prices in your state, broken down by body type segment.",
+    description: "Auction stocking advisor for used-car dealers. Scores up to 10 VINs with BUY/CAUTION/PASS verdicts, or loads a rooftop's live inventory to flag aging units and fast/slow movers.",
+    useCases: [
+      { persona: "Auction Buyer", desc: "Paste the run-list VINs into the VIN Checker before you walk the lanes — each VIN comes back with predicted retail vs. wholesale price, expected margin, local supply count, and a BUY / CAUTION / PASS recommendation." },
+      { persona: "Used-Car Manager", desc: "Look up your own rooftop or a competitor by dealer_id or domain. See total units, average price/miles/DOM, an inventory concentration heatmap, fast/slow movers from regional sold data, and a list of every unit sitting over 45 DOM." },
+      { persona: "Independent Dealer", desc: "Run the VIN Checker on trade-ins or potential auction buys to sanity-check the retail-to-wholesale spread before writing the ticket." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (Enterprise tier required for the Sold Summary API used in the dealer view)" },
+      { name: "vin", desc: "17-character VIN — pre-fills the VIN Checker textarea; auto-runs in live mode" },
+      { name: "zip", desc: "ZIP code used for local pricing and supply in the VIN Checker" },
+      { name: "dealer_id", desc: "MarketCheck dealer ID — auto-opens the By Dealer Stock tab and loads that dealer's inventory in live mode" },
+      { name: "embed", desc: "Set to any value to render in iframe-embed mode (hides the settings gear)" },
+    ],
     inputParams: [
       { name: "state", type: "string", required: true, desc: "2-letter state code" },
       { name: "zip", type: "string", required: false, desc: "ZIP code" },
