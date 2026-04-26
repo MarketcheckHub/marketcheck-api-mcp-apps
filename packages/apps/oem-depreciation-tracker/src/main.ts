@@ -984,8 +984,8 @@ function renderSegmentChart() {
 
   const myBodyTypes = new Set(data.models.filter(m => m.isMyBrand).map(m => m.bodyType));
 
-  const barH = Math.max(16, Math.min(28, (chartH - (segs.length - 1) * 6) / segs.length));
-  const gap = (chartH - barH * segs.length) / Math.max(segs.length - 1, 1);
+  const barH = 28;
+  const gap = 10;
 
   segs.forEach((s, i) => {
     const y = pad.top + i * (barH + gap);
