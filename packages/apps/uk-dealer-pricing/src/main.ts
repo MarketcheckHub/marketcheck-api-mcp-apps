@@ -340,7 +340,9 @@ function _normalizeDashboard(raw: any, dealerLabel: string): DashboardData | nul
   const rawSales: any[] = recentSrc?.listings ?? recentSrc?.recent_sales ?? [];
   const recentSales: RecentSale[] = rawSales.slice(0, 15).map((r: any): RecentSale => {
     const b = r.build ?? {};
-    const soldRaw = String(r.sold_date ?? r.last_seen_date ?? r.removed_date ?? "");
+    // UK Recents returns close-out date as `last_seen_at_date` (ISO string).
+    // Keep the older fallbacks for proxy/normalized payloads.
+    const soldRaw = String(r.sold_date ?? r.last_seen_at_date ?? r.last_seen_date ?? r.removed_date ?? "");
     return {
       year: Number(r.year ?? b.year ?? 0),
       make: String(r.make ?? b.make ?? ""),
