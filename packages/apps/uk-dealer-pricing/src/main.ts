@@ -524,6 +524,8 @@ function renderInputForm() {
   demoBtn.textContent = "Load Demo Data";
   demoBtn.style.cssText = "padding:10px 24px;border-radius:6px;border:1px solid #334155;background:transparent;color:#94a3b8;font-size:14px;cursor:pointer;font-family:inherit;";
   demoBtn.addEventListener("click", () => {
+    activeDomBucket = null;
+    activeAction = null;
     renderDashboard(generateMockData());
   });
   buttonRow.appendChild(demoBtn);
@@ -541,6 +543,10 @@ async function handleAnalyse() {
   const make = makeInput?.value?.trim() || "";
   const postalCode = postalInput?.value?.trim() || "";
   const dealerLabel = dealerId ? `Dealer ${dealerId}` : "UK Market Sample";
+
+  // Fresh dataset → reset interactive filters from any prior dashboard.
+  activeDomBucket = null;
+  activeAction = null;
 
   // Show loading
   document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#94a3b8;">
@@ -576,8 +582,6 @@ async function handleAnalyse() {
 // ── Render Dashboard ───────────────────────────────────────────────────
 function renderDashboard(data: DashboardData) {
   document.body.innerHTML = "";
-  activeDomBucket = null;
-  activeAction = null;
 
   // Header
   const header = el("div", {
