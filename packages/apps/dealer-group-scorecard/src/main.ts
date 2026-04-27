@@ -6,7 +6,7 @@
 import { App } from "@modelcontextprotocol/ext-apps";
 
 let _safeApp: any = null;
-try { _safeApp = new App({ name: "dealer-group-scorecard" }); } catch {}
+try { _safeApp = new App({ name: "dealer-group-scorecard", version: "1.0.0" }); } catch {}
 
 // ── Dual-Mode Data Provider ────────────────────────────────────────────
 function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | null } {
@@ -46,7 +46,7 @@ function _proxyBase(): string {
 
 // ── Direct MarketCheck API Client (browser → api.marketcheck.com) ──────
 const _MC = "https://api.marketcheck.com";
-async function _mcApi(path, params = {}) {
+async function _mcApi(path: string, params: Record<string, any> = {}): Promise<any> {
   const auth = _getAuth();
   if (!auth.value) return null;
   const prefix = path.startsWith("/api/") ? "" : "/v2";
@@ -55,21 +55,23 @@ async function _mcApi(path, params = {}) {
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
   }
-  const headers = {};
+  const headers: Record<string, string> = {};
   if (auth.mode === "oauth_token") headers["Authorization"] = "Bearer " + auth.value;
   const res = await fetch(url.toString(), { headers });
   if (!res.ok) throw new Error("MC API " + res.status);
   return res.json();
 }
-function _mcDecode(vin) { return _mcApi("/decode/car/neovin/" + vin + "/specs"); }
-function _mcPredict(p) { return _mcApi("/predict/car/us/marketcheck_price/comparables", p); }
-function _mcActive(p) { return _mcApi("/search/car/active", p); }
-function _mcRecent(p) { return _mcApi("/search/car/recents", p); }
-function _mcHistory(vin) { return _mcApi("/history/car/" + vin); }
-function _mcSold(p) { return _mcApi("/api/v1/sold-vehicles/summary", p); }
-function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;delete q.oem;} return _mcApi("/search/car/incentive/oem", q); }
-function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
-function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
+function _mcDecode(vin: string) { return _mcApi("/decode/car/neovin/" + vin + "/specs"); }
+function _mcPredict(p: Record<string, any>) { return _mcApi("/predict/car/us/marketcheck_price/comparables", p); }
+function _mcActive(p: Record<string, any>) { return _mcApi("/search/car/active", p); }
+function _mcRecent(p: Record<string, any>) { return _mcApi("/search/car/recents", p); }
+function _mcHistory(vin: string) { return _mcApi("/history/car/" + vin); }
+function _mcSold(p: Record<string, any>) { return _mcApi("/api/v1/sold-vehicles/summary", p); }
+function _mcIncentives(p: Record<string, any>) { const q: Record<string, any> = { ...p }; if (q.oem && !q.make) { q.make = q.oem; delete q.oem; } return _mcApi("/search/car/incentive/oem", q); }
+function _mcUkActive(p: Record<string, any>) { return _mcApi("/search/car/uk/active", p); }
+function _mcUkRecent(p: Record<string, any>) { return _mcApi("/search/car/uk/recents", p); }
+// Mark unused-by-this-app boilerplate helpers as referenced for the type checker
+void _mcDecode; void _mcPredict; void _mcHistory; void _mcSold; void _mcIncentives; void _mcUkActive; void _mcUkRecent;
 
 // ── Per-ticker filter slices ───────────────────────────────────────────
 // Public dealer groups can't be isolated by seller_name without Enterprise
@@ -1046,8 +1048,10 @@ async function main() {
         <button id="_banner_save" style="padding:8px 16px;border-radius:6px;border:none;background:#f59e0b;color:#0f172a;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">Activate</button>
       </div>`;
     document.body.insertBefore(_db, document.body.firstChild);
-    _db.querySelector("#_banner_save").addEventListener("click", () => {
-      const k = _db.querySelector("#_banner_key").value.trim();
+    const _saveBtn = _db.querySelector("#_banner_save") as HTMLButtonElement | null;
+    const _keyInp = _db.querySelector("#_banner_key") as HTMLInputElement | null;
+    _saveBtn?.addEventListener("click", () => {
+      const k = _keyInp?.value.trim();
       if (!k) return;
       localStorage.setItem("mc_api_key", k);
       _db.style.background = "linear-gradient(135deg,#05966922,#10b98111)";
@@ -1055,7 +1059,7 @@ async function main() {
       _db.innerHTML = '<div style="font-size:13px;font-weight:700;color:#10b981;">&#10003; API key saved — reloading with live data...</div>';
       setTimeout(() => location.reload(), 800);
     });
-    _db.querySelector("#_banner_key").addEventListener("keydown", (e) => { if (e.key === "Enter") _db.querySelector("#_banner_save").click(); });
+    _keyInp?.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Enter") _saveBtn?.click(); });
   }
 
   // Loading state
