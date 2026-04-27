@@ -1542,6 +1542,83 @@ function generateCurlExample(app) {
   -d '${JSON.stringify(body, null, 2)}'</pre>`;
 }
 
+// Sample values keyed by URL-param name. Used to render realistic per-app
+// URL examples on each how-to-build page so analyst apps don't show VIN
+// templates and VIN apps don't show ticker templates.
+const URL_PARAM_SAMPLES = {
+  api_key: "YOUR_KEY",
+  vin: "KNDCB3LC9L5359658",
+  vins: "KNDCB3LC9L5359658,2T3P1RFV5MW123456",
+  price: "25000",
+  askingPrice: "25000",
+  asking_price: "25000",
+  miles: "35000",
+  mileage: "35000",
+  zip: "90044",
+  zipcode: "90044",
+  zip_code: "90044",
+  state: "CA",
+  ticker: "F",
+  tickers: "F,GM,TSLA",
+  make: "Toyota",
+  model: "Camry",
+  year: "2022",
+  bodyType: "suv",
+  body_type: "suv",
+  fuel: "Electric",
+  dealer_id: "12345",
+  dealerId: "12345",
+  compact: "true",
+  embed: "true",
+};
+
+function generateUrlExamples(app) {
+  const params = app.urlParams || [];
+  if (params.length === 0) return "";
+  const baseUrl = `https://apps.marketcheck.com/apps/${app.id}/dist/index.html`;
+  const sampleFor = (name) => URL_PARAM_SAMPLES[name] !== undefined ? URL_PARAM_SAMPLES[name] : "VALUE";
+  const buildUrl = (names) => {
+    const parts = names.map(n => `${n}=${sampleFor(n)}`);
+    return parts.length ? `${baseUrl}?${parts.join("&amp;")}` : baseUrl;
+  };
+
+  const allNames = params.map(p => p.name);
+  const configNames = ["api_key", "compact", "embed"];
+  const dataNames = allNames.filter(n => !configNames.includes(n));
+  const hasCompact = allNames.includes("compact");
+  const hasEmbed = allNames.includes("embed");
+  const hasApiKey = allNames.includes("api_key");
+
+  const examples = [];
+  if (dataNames.length === 0) {
+    examples.push({ comment: "# Basic", url: buildUrl(hasApiKey ? ["api_key"] : []) });
+  } else {
+    const basicNames = (hasApiKey ? ["api_key"] : []).concat([dataNames[0]]);
+    examples.push({
+      comment: `# Basic — pass ${dataNames[0]} to auto-load`,
+      url: buildUrl(basicNames),
+    });
+    if (dataNames.length > 1) {
+      const fullNames = (hasApiKey ? ["api_key"] : []).concat(dataNames);
+      examples.push({ comment: "# Full — all data parameters", url: buildUrl(fullNames) });
+    }
+  }
+  if (hasEmbed || hasCompact) {
+    const embedNames = (hasApiKey ? ["api_key"] : [])
+      .concat(dataNames)
+      .concat(hasEmbed ? ["embed"] : [])
+      .concat(hasCompact ? ["compact"] : []);
+    const label = hasCompact && hasEmbed
+      ? "# Compact widget — for iframe embeds"
+      : hasEmbed
+      ? "# Embedded mode — for iframe embeds"
+      : "# Compact mode — narrow widget layout";
+    examples.push({ comment: label, url: buildUrl(embedNames) });
+  }
+
+  return examples.map(e => `${e.comment}\n${e.url}`).join("\n\n");
+}
+
 function generateMcpConfig(app) {
   return `
     <h3>2. As an MCP App (AI Assistants)</h3>
@@ -1904,17 +1981,7 @@ pre.code-block {
       </tbody>
     </table>
     <h3>URL Examples</h3>
-    <pre class="code-block"># Basic — auto-generate a report for a VIN
-https://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658
-
-# Full — with asking price, mileage, and ZIP for deal scoring
-https://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;price=25000&amp;miles=35000&amp;zip=90044
-
-# Compact widget — for iframe embeds (400px width)
-https://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;compact=true&amp;embed=true
-
-# Using aliases
-https://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;askingPrice=25000&amp;mileage=35000&amp;zipcode=90044</pre>
+    <pre class="code-block">${generateUrlExamples(app)}</pre>
   </div>` : ""}
 
   <!-- Screenshot -->
