@@ -204,13 +204,13 @@ function getLTVBadge(ltv: number): { label: string; color: string; bg: string } 
 // ── Mock Data ──────────────────────────────────────────────────────────
 const MOCK_PORTFOLIO = [
   { vin: "KNDCB3LC9L5359658", loanAmount: 20000, make: "Kia", model: "Forte", year: 2020, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 18500 },
-  { vin: "SHHFK7H4XLU423161", loanAmount: 22000, make: "Honda", model: "Civic Hatchback", year: 2020, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 23800 },
+  { vin: "1HGCV1F34LA000001", loanAmount: 25000, make: "Honda", model: "Accord", year: 2020, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 27200 },
   { vin: "5YJSA1E26MF000001", loanAmount: 52000, make: "Tesla", model: "Model S", year: 2021, segment: "EV" as Segment, fuelType: "Electric", baseValue: 48500 },
-  { vin: "1FTEW1C89HKC06560", loanAmount: 38000, make: "Ford", model: "F-150", year: 2017, segment: "Truck" as Segment, fuelType: "Gas", baseValue: 36200 },
-  { vin: "4T1DAACK3SU502218", loanAmount: 28000, make: "Toyota", model: "Camry", year: 2025, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 29500 },
-  { vin: "5UXKU2C5XK0Z64591", loanAmount: 48000, make: "BMW", model: "X6", year: 2019, segment: "Luxury" as Segment, fuelType: "Gas", baseValue: 51200 },
-  { vin: "5FNYF3H54DB022643", loanAmount: 18000, make: "Honda", model: "Pilot", year: 2013, segment: "SUV" as Segment, fuelType: "Gas", baseValue: 16900 },
-  { vin: "3KPF24AD6NE428800", loanAmount: 21000, make: "Kia", model: "Forte", year: 2022, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 22400 },
+  { vin: "1FTFW1E85MFA00001", loanAmount: 42000, make: "Ford", model: "F-150", year: 2021, segment: "Truck" as Segment, fuelType: "Gas", baseValue: 44800 },
+  { vin: "4T1BF1FK5CU500000", loanAmount: 22000, make: "Toyota", model: "Camry", year: 2021, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 24500 },
+  { vin: "WBAJB9C51KB500000", loanAmount: 45000, make: "BMW", model: "X5", year: 2019, segment: "Luxury" as Segment, fuelType: "Gas", baseValue: 48200 },
+  { vin: "2HGFC2F59MH500000", loanAmount: 21000, make: "Honda", model: "Civic", year: 2021, segment: "Sedan" as Segment, fuelType: "Gas", baseValue: 23100 },
+  { vin: "1FMCU9J94MU500000", loanAmount: 30000, make: "Ford", model: "Escape", year: 2021, segment: "SUV" as Segment, fuelType: "Gas", baseValue: 28900 },
 ];
 
 function generateMockStressResult(scenario: Scenario, customPct: number): StressResult {
