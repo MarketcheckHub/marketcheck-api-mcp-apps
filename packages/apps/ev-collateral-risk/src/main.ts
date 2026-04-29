@@ -39,6 +39,44 @@ function _proxyBase(): string {
   return location.protocol.startsWith("http") ? "" : "http://localhost:3001";
 }
 
+// ── Direct MarketCheck API Helper ──────────────────────────────────────
+const _MC = "https://api.marketcheck.com";
+
+async function _mcApi(path: string, params: Record<string, any> = {}): Promise<any> {
+  const auth = _getAuth();
+  if (!auth.value) return null;
+  const url = new URL(_MC + path);
+  if (auth.mode === "api_key") url.searchParams.set("api_key", auth.value);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = {};
+  if (auth.mode === "oauth_token") headers["Authorization"] = "Bearer " + auth.value;
+  const res = await fetch(url.toString(), { headers });
+  if (!res.ok) throw new Error("MC API " + res.status);
+  return res.json();
+}
+
+function _mcSold(p: Record<string, any>): Promise<any> {
+  return _mcApi("/api/v1/sold-vehicles/summary", p);
+}
+
+function _monthRanges(n: number): Array<{ dateFrom: string; dateTo: string; label: string }> {
+  const now = new Date();
+  const ranges: Array<{ dateFrom: string; dateTo: string; label: string }> = [];
+  for (let i = n; i >= 1; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+    ranges.push({
+      dateFrom: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`,
+      dateTo: `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, "0")}-${String(lastDay.getDate()).padStart(2, "0")}`,
+      label: d.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+    });
+  }
+  return ranges;
+}
+// ── End Direct API Helper ──────────────────────────────────────────────
+
 async function _callTool(toolName: string, args: Record<string, any>): Promise<any> {
   if (_safeApp) {
     try {
@@ -481,9 +519,13 @@ function drawChart(canvas: HTMLCanvasElement): void {
   // Clear
   ctx.clearRect(0, 0, W, H);
 
-  // Y-axis range
-  const yMin = 28000;
-  const yMax = 50000;
+  // Y-axis range — computed from actual data
+  const allPrices = monthlyPrices.flatMap(p => [p.evAvgPrice, p.iceAvgPrice]).filter(v => v > 0);
+  const dataMin = allPrices.length > 0 ? Math.min(...allPrices) : 28000;
+  const dataMax = allPrices.length > 0 ? Math.max(...allPrices) : 50000;
+  const yPad = Math.max((dataMax - dataMin) * 0.12, 2000);
+  const yMin = Math.floor((dataMin - yPad) / 2000) * 2000;
+  const yMax = Math.ceil((dataMax + yPad) / 2000) * 2000;
   const yRange = yMax - yMin;
 
   // Helper: map data to canvas coords
@@ -494,10 +536,14 @@ function drawChart(canvas: HTMLCanvasElement): void {
     return pad.top + chartH - ((val - yMin) / yRange) * chartH;
   }
 
+  // Dynamic y-ticks: 5-7 evenly spaced
+  const tickStep = Math.ceil((yMax - yMin) / 6 / 2000) * 2000;
+  const yTicks: number[] = [];
+  for (let t = yMin; t <= yMax; t += tickStep) yTicks.push(t);
+
   // Grid lines
   ctx.strokeStyle = "#334155";
   ctx.lineWidth = 0.5;
-  const yTicks = [28000, 32000, 36000, 40000, 44000, 48000];
   yTicks.forEach((val) => {
     const y = yPos(val);
     ctx.beginPath();
@@ -778,6 +824,112 @@ function renderStateHeatmap(parent: HTMLElement): void {
   parent.appendChild(panel);
 }
 
+// ─── Direct Fetch (live mode) ────────────────────────────────────────────────
+
+async function _fetchDirect(state?: string): Promise<void> {
+  const stateParam: Record<string, string> = state ? { state } : {};
+
+  // Generate 12 monthly date ranges for the time series chart
+  const ranges = _monthRanges(12);
+
+  // Fire all API calls simultaneously:
+  //   - 12 months × 2 (EV + ICE) for the chart
+  //   - EV by make for brand risk table
+  //   - EV by state for adoption heatmap
+  //   - All fuel types for penetration scorecard
+  const [monthlyResults, evByBrand, evByState, fuelTotals] = await Promise.all([
+    Promise.all(
+      ranges.map(r =>
+        Promise.all([
+          _mcSold({ fuel_type_category: "EV", ranking_dimensions: "fuel_type_category", ranking_measure: "sold_count,average_sale_price", date_from: r.dateFrom, date_to: r.dateTo, ...stateParam }),
+          _mcSold({ fuel_type_category: "ICE", ranking_dimensions: "fuel_type_category", ranking_measure: "sold_count,average_sale_price", date_from: r.dateFrom, date_to: r.dateTo, ...stateParam }),
+        ])
+      )
+    ),
+    _mcSold({ fuel_type_category: "EV", ranking_dimensions: "make", ranking_measure: "sold_count,average_sale_price", ranking_order: "desc", top_n: 12, ...stateParam }),
+    _mcSold({ fuel_type_category: "EV", ranking_dimensions: "state", ranking_measure: "sold_count,market_share", ranking_order: "desc", top_n: 15 }),
+    _mcSold({ ranking_dimensions: "fuel_type_category", ranking_measure: "sold_count,average_sale_price,average_days_on_market" }),
+  ]);
+
+  // ── Parse monthly EV vs ICE price series ──────────────────────────────
+  const parsed: MonthlyPrice[] = [];
+  for (let i = 0; i < ranges.length; i++) {
+    const [evRes, iceRes] = monthlyResults[i];
+    const evRow = (evRes?.data ?? [])[0];
+    const iceRow = (iceRes?.data ?? [])[0];
+    const evAvgPrice = evRow?.average_sale_price ?? 0;
+    const iceAvgPrice = iceRow?.average_sale_price ?? 0;
+    if (evAvgPrice > 0 && iceAvgPrice > 0) {
+      parsed.push({ month: ranges[i].label, evAvgPrice, iceAvgPrice });
+    }
+  }
+  if (parsed.length >= 3) {
+    monthlyPrices.length = 0;
+    monthlyPrices.push(...parsed);
+    const first = monthlyPrices[0];
+    const last = monthlyPrices[monthlyPrices.length - 1];
+    const evDepr = ((first.evAvgPrice - last.evAvgPrice) / first.evAvgPrice) * 100;
+    const iceDepr = ((first.iceAvgPrice - last.iceAvgPrice) / first.iceAvgPrice) * 100;
+    if (evDepr > 0) scorecard.evAvgDepreciation = parseFloat(evDepr.toFixed(1));
+    if (iceDepr > 0) scorecard.iceAvgDepreciation = parseFloat(iceDepr.toFixed(1));
+    if (iceDepr > 0) scorecard.evIceRatio = parseFloat((evDepr / iceDepr).toFixed(1));
+  }
+
+  // ── Parse brand-level EV risk ──────────────────────────────────────────
+  const brandData: any[] = evByBrand?.data ?? [];
+  if (brandData.length > 0) {
+    const baseDepr = scorecard.evAvgDepreciation || 20;
+    const newBrands: BrandRisk[] = brandData.map((r: any) => {
+      // Estimate brand depr rate: luxury EVs (>$50K) depreciate ~30% faster than market avg
+      const avgPrice = r.average_sale_price ?? 0;
+      const priceFactor = avgPrice > 55000 ? 1.30 : avgPrice > 45000 ? 1.15 : avgPrice > 35000 ? 1.00 : 0.85;
+      const deprRate = parseFloat((baseDepr * priceFactor).toFixed(1));
+      const tier: BrandRisk["riskTier"] = deprRate > 25 ? "HIGH" : deprRate > 18 ? "ELEVATED" : deprRate > 12 ? "MODERATE" : "LOW";
+      return {
+        make: r.make ?? "Unknown",
+        evVolume: r.sold_count ?? 0,
+        evAvgPrice: avgPrice,
+        evDepreciationRate: deprRate,
+        iceDepreciationRate: 0,
+        evIceRatio: 0,
+        riskTier: tier,
+      };
+    });
+    brandRisks.length = 0;
+    brandRisks.push(...newBrands);
+  }
+
+  // ── Parse state EV adoption heatmap ───────────────────────────────────
+  const stateData: any[] = evByState?.data ?? [];
+  if (stateData.length > 0) {
+    const newStates: StateAdoption[] = stateData.map((r: any) => {
+      const pct = r.market_share ?? 0;
+      const level: StateAdoption["riskLevel"] = pct > 12 ? "HIGH" : pct > 8 ? "MODERATE" : "LOW";
+      return {
+        state: r.state ?? "Unknown",
+        evPenetration: parseFloat((pct as number).toFixed(1)),
+        evVolume: r.sold_count ?? 0,
+        riskLevel: level,
+      };
+    });
+    stateAdoptions.length = 0;
+    stateAdoptions.push(...newStates);
+  }
+
+  // ── Update scorecard from fuel type totals ─────────────────────────────
+  const totalsData: any[] = fuelTotals?.data ?? [];
+  if (totalsData.length > 0) {
+    const evRow = totalsData.find((r: any) => r.fuel_type_category === "EV");
+    const totalSold = totalsData.reduce((s: number, r: any) => s + (r.sold_count ?? 0), 0);
+    if (evRow && totalSold > 0) {
+      scorecard.evPenetration = parseFloat(((evRow.sold_count / totalSold) * 100).toFixed(1));
+    }
+    if (evRow?.average_days_on_market) {
+      scorecard.evDaysSupply = Math.round(evRow.average_days_on_market);
+    }
+  }
+}
+
 // ─── Bootstrap ──────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -800,86 +952,62 @@ async function main(): Promise<void> {
   loadingDiv.innerHTML = `
     <div style="font-size:40px;margin-bottom:16px;">&#9889;</div>
     <div style="font-size:16px;color:#94a3b8;margin-bottom:8px;">Loading EV market data...</div>
-    <div style="font-size:13px;color:#475569;">Fetching depreciation & adoption signals</div>
+    <div style="font-size:13px;color:#475569;">Fetching 12-month depreciation & adoption signals</div>
   `;
   document.body.appendChild(loadingDiv);
 
   try {
     const urlParams = _getUrlParams();
-    const result = await _callTool("ev-collateral-risk", {
-      timeRange: "1Y",
-      ...(urlParams.state ? { state: urlParams.state } : {}),
-    });
-
-    if (result?.content?.[0]?.text) {
-      const data = JSON.parse(result.content[0].text);
-
-      if (!data.error) {
-        // Parse monthly EV vs ICE price series
-        if (Array.isArray(data.evSeries) && Array.isArray(data.iceSeries)) {
-          const parsed: MonthlyPrice[] = [];
-          for (let i = 0; i < Math.min(data.evSeries.length, data.iceSeries.length); i++) {
-            const evEntry = data.evSeries[i];
-            const iceEntry = data.iceSeries[i];
-            const evAvgPrice = evEntry?.data?.rankings?.[0]?.average_sale_price ?? 0;
-            const iceAvgPrice = iceEntry?.data?.rankings?.[0]?.average_sale_price ?? 0;
-            if (evAvgPrice > 0 && iceAvgPrice > 0) {
-              parsed.push({ month: evEntry.date ?? `M${i + 1}`, evAvgPrice, iceAvgPrice });
+    if (mode === "live") {
+      // Direct browser → MarketCheck API (no proxy needed)
+      await _fetchDirect(urlParams.state);
+    } else {
+      // MCP mode: route through MCP tool proxy
+      const result = await _callTool("ev-collateral-risk", {
+        timeRange: "1Y",
+        ...(urlParams.state ? { state: urlParams.state } : {}),
+      });
+      if (result?.content?.[0]?.text) {
+        const data = JSON.parse(result.content[0].text);
+        if (!data.error) {
+          if (Array.isArray(data.evSeries) && Array.isArray(data.iceSeries)) {
+            const parsed: MonthlyPrice[] = [];
+            for (let i = 0; i < Math.min(data.evSeries.length, data.iceSeries.length); i++) {
+              const evAvgPrice = data.evSeries[i]?.data?.rankings?.[0]?.average_sale_price ?? 0;
+              const iceAvgPrice = data.iceSeries[i]?.data?.rankings?.[0]?.average_sale_price ?? 0;
+              if (evAvgPrice > 0 && iceAvgPrice > 0) {
+                parsed.push({ month: data.evSeries[i].date ?? `M${i + 1}`, evAvgPrice, iceAvgPrice });
+              }
+            }
+            if (parsed.length >= 3) {
+              monthlyPrices.length = 0;
+              monthlyPrices.push(...parsed);
+              const first = monthlyPrices[0];
+              const last = monthlyPrices[monthlyPrices.length - 1];
+              const evDepr = ((first.evAvgPrice - last.evAvgPrice) / first.evAvgPrice) * 100;
+              const iceDepr = ((first.iceAvgPrice - last.iceAvgPrice) / first.iceAvgPrice) * 100;
+              if (evDepr > 0) scorecard.evAvgDepreciation = parseFloat(evDepr.toFixed(1));
+              if (iceDepr > 0) scorecard.iceAvgDepreciation = parseFloat(iceDepr.toFixed(1));
+              if (iceDepr > 0) scorecard.evIceRatio = parseFloat((evDepr / iceDepr).toFixed(1));
             }
           }
-          if (parsed.length >= 3) {
-            monthlyPrices.length = 0;
-            monthlyPrices.push(...parsed);
-            // Recalculate scorecard depreciation from series
-            const first = monthlyPrices[0];
-            const last = monthlyPrices[monthlyPrices.length - 1];
-            const evDepr = ((first.evAvgPrice - last.evAvgPrice) / first.evAvgPrice) * 100;
-            const iceDepr = ((first.iceAvgPrice - last.iceAvgPrice) / first.iceAvgPrice) * 100;
-            if (evDepr > 0) scorecard.evAvgDepreciation = parseFloat(evDepr.toFixed(1));
-            if (iceDepr > 0) scorecard.iceAvgDepreciation = parseFloat(iceDepr.toFixed(1));
-            if (iceDepr > 0) scorecard.evIceRatio = parseFloat((evDepr / iceDepr).toFixed(1));
+          if (Array.isArray(data.evByBrand?.rankings) && data.evByBrand.rankings.length > 0) {
+            const baseDepr = scorecard.evAvgDepreciation;
+            const newBrands: BrandRisk[] = data.evByBrand.rankings.slice(0, 12).map((r: any) => {
+              const avgPrice = r.average_sale_price ?? 0;
+              const priceFactor = avgPrice > 55000 ? 1.30 : avgPrice > 45000 ? 1.15 : avgPrice > 35000 ? 1.00 : 0.85;
+              const deprRate = parseFloat((baseDepr * priceFactor).toFixed(1));
+              const tier: BrandRisk["riskTier"] = deprRate > 25 ? "HIGH" : deprRate > 18 ? "ELEVATED" : deprRate > 12 ? "MODERATE" : "LOW";
+              return { make: r.make ?? "Unknown", evVolume: r.sold_count ?? 0, evAvgPrice: avgPrice, evDepreciationRate: deprRate, iceDepreciationRate: 0, evIceRatio: 0, riskTier: tier };
+            });
+            if (newBrands.length > 0) { brandRisks.length = 0; brandRisks.push(...newBrands); }
           }
-        }
-
-        // Parse brand-level EV data
-        if (Array.isArray(data.evByBrand?.rankings) && data.evByBrand.rankings.length > 0) {
-          const baseDepr = scorecard.evAvgDepreciation;
-          const newBrands: BrandRisk[] = data.evByBrand.rankings.slice(0, 12).map((r: any) => {
-            const deprRate = parseFloat((baseDepr * (0.75 + (r.sold_count % 50) / 100)).toFixed(1));
-            const tier: BrandRisk["riskTier"] = deprRate > 25 ? "HIGH" : deprRate > 18 ? "ELEVATED" : deprRate > 12 ? "MODERATE" : "LOW";
-            return {
-              make: r.make ?? "Unknown",
-              evVolume: r.sold_count ?? 0,
-              evAvgPrice: r.average_sale_price ?? 0,
-              evDepreciationRate: deprRate,
-              iceDepreciationRate: 0,
-              evIceRatio: 0,
-              riskTier: tier,
-            };
-          });
-          if (newBrands.length > 0) {
-            brandRisks.length = 0;
-            brandRisks.push(...newBrands);
-          }
-        }
-
-        // Parse state EV adoption data
-        if (Array.isArray(data.evByState?.rankings) && data.evByState.rankings.length > 0) {
-          const newStates: StateAdoption[] = data.evByState.rankings.slice(0, 15).map((r: any) => {
-            const pct = r.market_share ?? 0;
-            const level: StateAdoption["riskLevel"] = pct > 12 ? "HIGH" : pct > 8 ? "MODERATE" : "LOW";
-            return {
-              state: r.state ?? r.dimension ?? "Unknown",
-              evPenetration: pct,
-              evVolume: r.sold_count ?? 0,
-              riskLevel: level,
-            };
-          });
-          if (newStates.length > 0) {
-            stateAdoptions.length = 0;
-            stateAdoptions.push(...newStates);
-            const avgPct = newStates.reduce((s, x) => s + x.evPenetration, 0) / newStates.length;
-            if (avgPct > 0) scorecard.evPenetration = parseFloat(avgPct.toFixed(1));
+          if (Array.isArray(data.evByState?.rankings) && data.evByState.rankings.length > 0) {
+            const newStates: StateAdoption[] = data.evByState.rankings.slice(0, 15).map((r: any) => {
+              const pct = r.market_share ?? 0;
+              return { state: r.state ?? "Unknown", evPenetration: pct, evVolume: r.sold_count ?? 0, riskLevel: pct > 12 ? "HIGH" : pct > 8 ? "MODERATE" : "LOW" as StateAdoption["riskLevel"] };
+            });
+            if (newStates.length > 0) { stateAdoptions.length = 0; stateAdoptions.push(...newStates); }
           }
         }
       }
