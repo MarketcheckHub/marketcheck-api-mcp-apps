@@ -143,7 +143,7 @@ const READY_APPS = new Set([
   // Appraiser
   "appraiser-workbench", "comparables-explorer",
   // Dealership Group
-  "dealer-group-scorecard",
+  "group-operations-center", "inventory-balancer", "dealer-group-scorecard",
   // Lender
   "underwriting-decision-support", "lender-portfolio-stress-test", "portfolio-risk-monitor",
   // Analyst
