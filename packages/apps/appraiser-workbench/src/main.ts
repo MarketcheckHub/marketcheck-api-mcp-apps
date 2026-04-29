@@ -1,7 +1,7 @@
 import { App } from "@modelcontextprotocol/ext-apps";
 
 let _safeApp: any = null;
-try { _safeApp = new App({ name: "appraiser-workbench" }); } catch {}
+try { _safeApp = new App({ name: "appraiser-workbench" }); } catch { }
 
 // ── Dual-Mode Data Provider ────────────────────────────────────────────
 function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | null } {
@@ -62,21 +62,154 @@ function _mcActive(p) { return _mcApi("/search/car/active", p); }
 function _mcRecent(p) { return _mcApi("/search/car/recents", p); }
 function _mcHistory(vin) { return _mcApi("/history/car/" + vin); }
 function _mcSold(p) { return _mcApi("/api/v1/sold-vehicles/summary", p); }
-function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;delete q.oem;} return _mcApi("/search/car/incentive/oem", q); }
+function _mcIncentives(p) { const q = { ...p }; if (q.oem && !q.make) { q.make = q.oem; delete q.oem; } return _mcApi("/search/car/incentive/oem", q); }
 function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
 function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
 
 async function _fetchDirect(args) {
   const decode = await _mcDecode(args.vin);
-  const [retail,wholesale,history] = await Promise.all([_mcPredict({...args,dealer_type:"franchise"}),_mcPredict({...args,dealer_type:"independent"}),_mcHistory(args.vin)]);
-  const [activeComps,soldComps] = await Promise.all([_mcActive({make:decode?.make,model:decode?.model,zip:args.zip,radius:100,stats:"price,miles,dom",rows:25}),_mcRecent({make:decode?.make,model:decode?.model,zip:args.zip,radius:100,stats:"price",rows:25})]);
-  return {decode,retail,wholesale,activeComps,soldComps,history};
+  const yearRange = decode?.year ? `${decode.year - 1}-${decode.year + 1}` : undefined;
+  const [retail, wholesale, history] = await Promise.all([
+    _mcPredict({ ...args, dealer_type: "franchise" }).catch(() => ({})),
+    _mcPredict({ ...args, dealer_type: "independent" }).catch(() => ({})),
+    _mcHistory(args.vin).catch(() => ({})),
+  ]);
+  const [activeComps, soldComps] = await Promise.all([
+    _mcActive({ make: decode?.make, model: decode?.model, year: yearRange, zip: args.zip, radius: 100, stats: "price,miles,dom", rows: 25 }).catch(() => ({ listings: [] })),
+    _mcRecent({ make: decode?.make, model: decode?.model, year: yearRange, zip: args.zip, radius: 100, stats: "price,miles,dom", rows: 25 }).catch(() => ({ listings: [] })),
+  ]);
+  return { decode, retail, wholesale, activeComps, soldComps, history };
+}
+
+function _transformRawToAppraisalResult(raw: any, args: any): AppraisalResult {
+  const _dateOnly = (v: any): string => {
+    if (typeof v === "string") return v.split("T")[0];
+    if (typeof v === "number") {
+      const d = new Date(v);
+      if (!Number.isNaN(d.getTime())) return d.toISOString().split("T")[0];
+    }
+    if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString().split("T")[0];
+    return "";
+  };
+  const _num = (...vals: any[]): number => {
+    for (const v of vals) {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return 0;
+  };
+
+  const d = raw.decode ?? {};
+  const retailRaw = raw.retail ?? {};
+  const wholesaleRaw = raw.wholesale ?? {};
+  const activeRaw = raw.activeComps ?? {};
+  const soldRaw = raw.soldComps ?? {};
+  const historyRaw = raw.history ?? {};
+
+  // ── Decode ──
+  const decode: VehicleDecode = {
+    year: d.year ?? 0,
+    make: d.make ?? "Unknown",
+    model: d.model ?? "Unknown",
+    trim: d.trim ?? "",
+    engine: d.engine ?? d.engine_size ?? "",
+    transmission: d.transmission ?? "",
+    drivetrain: d.drivetrain ?? d.drive_type ?? "",
+    body_type: d.body_type ?? d.body_style ?? "",
+    fuel_type: d.fuel_type ?? d.fuel ?? "",
+    mpg_city: d.mpg_city ?? d.city_mileage ?? 0,
+    mpg_highway: d.mpg_highway ?? d.highway_mileage ?? 0,
+    msrp: d.msrp ?? d.base_msrp ?? 0,
+  };
+
+  // ── Price Predictions ──
+  const retailPrice = _num(
+    retailRaw.predicted_price,
+    retailRaw.marketcheck_price,
+    retailRaw.price,
+    retailRaw.comparables?.stats?.price?.mean,
+    retailRaw.comparables?.stats?.price?.avg,
+    retailRaw.recent_comparables?.stats?.price?.mean,
+    retailRaw.recent_comparables?.stats?.price?.avg,
+  );
+  const retail: PriceEstimate = {
+    predicted: Math.round(retailPrice),
+    low: Math.round(retailRaw.price_range?.low ?? retailRaw.price_stats?.mean_minus_one_std ?? (retailPrice > 0 ? retailPrice * 0.92 : 0)),
+    high: Math.round(retailRaw.price_range?.high ?? retailRaw.price_stats?.mean_plus_one_std ?? (retailPrice > 0 ? retailPrice * 1.08 : 0)),
+    confidence: retailPrice > 0 ? (retailRaw.confidence ?? 0.85) : 0,
+  };
+
+  const wholesalePrice = _num(
+    wholesaleRaw.predicted_price,
+    wholesaleRaw.marketcheck_price,
+    wholesaleRaw.price,
+    wholesaleRaw.comparables?.stats?.price?.mean,
+    wholesaleRaw.comparables?.stats?.price?.avg,
+    wholesaleRaw.recent_comparables?.stats?.price?.mean,
+    wholesaleRaw.recent_comparables?.stats?.price?.avg,
+  );
+  const wholesale: PriceEstimate = {
+    predicted: Math.round(wholesalePrice),
+    low: Math.round(wholesaleRaw.price_range?.low ?? wholesaleRaw.price_stats?.mean_minus_one_std ?? (wholesalePrice > 0 ? wholesalePrice * 0.92 : 0)),
+    high: Math.round(wholesaleRaw.price_range?.high ?? wholesaleRaw.price_stats?.mean_plus_one_std ?? (wholesalePrice > 0 ? wholesalePrice * 1.08 : 0)),
+    confidence: wholesalePrice > 0 ? (wholesaleRaw.confidence ?? 0.80) : 0,
+  };
+
+  // ── Active Comps ──
+  const activeListings: any[] = activeRaw.listings ?? [];
+  const activeComps: ActiveComp[] = activeListings.map((l: any) => ({
+    year: l.year ?? l.build?.year ?? decode.year,
+    make: l.make ?? l.build?.make ?? decode.make,
+    model: l.model ?? l.build?.model ?? decode.model,
+    trim: l.trim ?? l.build?.trim ?? "",
+    price: _num(l.price, l.list_price, l.ref_price, l.close_price, l.sold_price),
+    miles: l.miles ?? 0,
+    dealer_name: l.dealer?.name ?? l.seller_name ?? "Unknown Dealer",
+    days_on_market: l.dom ?? l.days_on_market ?? l.dom_active ?? 0,
+    distance: Math.round(l.dist ?? l.distance_from_point ?? 0),
+  })).filter((c) => c.price > 0);
+
+  // ── Sold Comps ──
+  const soldListingsPrimary: any[] = soldRaw.listings ?? [];
+  const soldListingsFallbackA: any[] = retailRaw.recent_comparables?.listings ?? [];
+  const soldListingsFallbackB: any[] = wholesaleRaw.recent_comparables?.listings ?? [];
+
+  const mapSoldListings = (listings: any[]): SoldComp[] => listings.map((l: any) => ({
+    year: l.year ?? l.build?.year ?? decode.year,
+    make: l.make ?? l.build?.make ?? decode.make,
+    model: l.model ?? l.build?.model ?? decode.model,
+    trim: l.trim ?? l.build?.trim ?? "",
+    price: _num(l.price, l.list_price, l.ref_price, l.close_price, l.sold_price),
+    miles: l.miles ?? 0,
+    dealer_name: l.dealer?.name ?? l.seller_name ?? "Unknown Dealer",
+    days_on_market: l.dom ?? l.days_on_market ?? l.dom_active ?? 0,
+    distance: Math.round(l.dist ?? l.distance_from_point ?? 0),
+    sold_date: _dateOnly(l.last_seen_at ?? l.sold_at ?? l.sold_date),
+  })).filter((c) => c.price > 0);
+
+  let soldComps: SoldComp[] = mapSoldListings(soldListingsPrimary);
+  if (soldComps.length === 0) soldComps = mapSoldListings(soldListingsFallbackA);
+  if (soldComps.length === 0) soldComps = mapSoldListings(soldListingsFallbackB);
+
+  // ── History ──
+  const historyListings: any[] = Array.isArray(historyRaw) ? historyRaw : (historyRaw.listings ?? []);
+  const history: HistoryEntry[] = historyListings.map((l: any) => ({
+    dealer_name: l.dealer?.name ?? l.seller_name ?? l.dealer_name ?? "Unknown",
+    price: _num(l.price, l.list_price, l.ref_price, l.close_price, l.sold_price),
+    first_seen: _dateOnly(l.first_seen_at ?? l.first_seen),
+    last_seen: _dateOnly(l.last_seen_at ?? l.last_seen),
+  })).filter((e) => e.price > 0);
+
+  return { decode, retail, wholesale, activeComps, soldComps, history };
 }
 
 async function _callTool(toolName, args) {
   // 1. MCP mode (Claude, VS Code, etc.)
-  if (_safeApp) {
-    try { const r = _safeApp.callServerTool({ name: toolName, arguments: args }); return r; } catch {}
+  if (_safeApp && window.parent !== window) {
+    try {
+      const r = await _safeApp.callServerTool({ name: toolName, arguments: args });
+      return r;
+    } catch { }
   }
   // 2. Direct API mode (browser → api.marketcheck.com)
   const auth = _getAuth();
@@ -92,7 +225,12 @@ async function _callTool(toolName, args) {
         body: JSON.stringify({ ...args, _auth_mode: auth.mode, _auth_value: auth.value }),
       });
       if (r.ok) { const d = await r.json(); return { content: [{ type: "text", text: JSON.stringify(d) }] }; }
-    } catch {}
+      const proxyErr = await r.text().catch(() => "");
+      throw new Error("Proxy " + r.status + (proxyErr ? ": " + proxyErr : ""));
+    } catch (e) {
+      if (e instanceof Error) throw e;
+    }
+    throw new Error("Unable to fetch live MarketCheck data (direct and proxy calls failed)");
   }
   // 4. Demo mode (null → app uses mock data)
   return null;
@@ -899,6 +1037,7 @@ function buildUI(): void {
         <button class="appraise-btn" id="appraise-btn">Appraise</button>
       </div>
       <div class="decode-row" id="decode-row"></div>
+      <div id="live-hint" style="margin-top:6px;min-height:16px;font-size:12px;color:#fbbf24;"></div>
     </div>
     <div class="panels">
       <div class="panel-left" id="panel-left">
@@ -987,10 +1126,27 @@ async function doAppraise(): Promise<void> {
   const zip = zipEl.value.trim();
   const isCertified = cpoEl.checked;
 
+  const row = document.getElementById("decode-row");
+  const hint = document.getElementById("live-hint");
+  if (row) row.innerHTML = "";
+  if (hint) hint.textContent = "";
+
+  const showInputError = (message: string) => {
+    if (row) {
+      row.innerHTML = `<span class="decode-badge" style="background:#7f1d1d;color:#fecaca;">Input Required</span><span style="font-size:12px;color:#fca5a5;">${message}</span>`;
+    }
+  };
+
   if (vin.length !== 17) {
     vinEl.style.borderColor = "#f87171";
+    showInputError("VIN is required and must be 17 characters.");
     setTimeout(() => { vinEl.style.borderColor = ""; }, 2000);
     return;
+  }
+
+  // Keep appraisal usable without ZIP for comp browsing; prediction API may return no value.
+  if (!zip && hint) {
+    hint.textContent = "ZIP not provided: comparables can still load, but predictions may be unavailable.";
   }
 
   btn.disabled = true;
@@ -1000,14 +1156,48 @@ async function doAppraise(): Promise<void> {
 
   try {
     const response = await _callTool("appraiser-workbench", { vin, miles, zip, isCertified, dealerType });
+    if (!response || !Array.isArray(response.content)) {
+      throw new Error("No response content from appraiser-workbench tool");
+    }
     const text = response.content
       .filter((c: { type: string }) => c.type === "text")
       .map((c: { text: string }) => c.text)
       .join("");
-    result = JSON.parse(text);
-  } catch {
-    // Fallback to mock data
-    result = MOCK_RESULT;
+    if (!text.trim()) {
+      throw new Error("Empty response payload from appraiser-workbench tool");
+    }
+    const raw = JSON.parse(text);
+    // Transform raw API response into AppraisalResult if it hasn't been transformed yet
+    // (detects raw API shape by checking for retail.predicted_price vs already-transformed retail.predicted)
+    result = (raw.retail && typeof raw.retail.predicted === "number")
+      ? raw
+      : _transformRawToAppraisalResult(raw, { vin, miles, zip, isCertified, dealerType });
+
+    const hasData =
+      !!result.decode?.year ||
+      !!result.retail?.predicted ||
+      !!result.wholesale?.predicted ||
+      (result.activeComps?.length ?? 0) > 0 ||
+      (result.soldComps?.length ?? 0) > 0 ||
+      (result.history?.length ?? 0) > 0;
+
+    if (!hasData && _getAuth().value) {
+      throw new Error("Live mode returned no usable records");
+    }
+  } catch (err) {
+    if (_detectAppMode() === "demo") {
+      result = MOCK_RESULT;
+    } else {
+      const reason = err instanceof Error ? err.message : "Unknown live-data error";
+      const row = document.getElementById("decode-row");
+      if (row) {
+        row.innerHTML = `<span class="decode-badge" style="background:#7f1d1d;color:#fecaca;">Live API Error</span><span style="font-size:12px;color:#fca5a5;">${reason.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</span>`;
+      }
+      console.error("Appraise failed:", err);
+      btn.disabled = false;
+      btn.textContent = "Appraise";
+      return;
+    }
   }
 
   currentResult = result;
@@ -1130,6 +1320,16 @@ function renderActiveComps(container: HTMLElement, data: AppraisalResult): void 
   const comps = [...data.activeComps];
   const predicted = data.retail.predicted;
 
+  if (comps.length === 0) {
+    container.innerHTML = `
+      <div class="placeholder" style="height:280px;">
+        <div class="placeholder-icon">&#x1F50D;</div>
+        <div class="placeholder-text">No active comps with usable pricing data</div>
+      </div>
+    `;
+    return;
+  }
+
   // Sort
   comps.sort((a, b) => {
     const aVal = (a as Record<string, unknown>)[activeSortCol];
@@ -1177,9 +1377,9 @@ function renderActiveComps(container: HTMLElement, data: AppraisalResult): void 
       </thead>
       <tbody>
         ${comps
-          .map((c) => {
-            const cls = c.price < predicted ? "below-predicted" : c.price > predicted ? "above-predicted" : "";
-            return `<tr class="${cls}">
+      .map((c) => {
+        const cls = c.price < predicted ? "below-predicted" : c.price > predicted ? "above-predicted" : "";
+        return `<tr class="${cls}">
               <td>${c.year} ${c.make} ${c.model} ${c.trim}</td>
               <td>${fmt$(c.price)}</td>
               <td>${fmtMi(c.miles)}</td>
@@ -1187,8 +1387,8 @@ function renderActiveComps(container: HTMLElement, data: AppraisalResult): void 
               <td>${c.days_on_market}</td>
               <td>${c.distance}</td>
             </tr>`;
-          })
-          .join("")}
+      })
+      .join("")}
       </tbody>
     </table>
   `;
@@ -1212,6 +1412,16 @@ function renderActiveComps(container: HTMLElement, data: AppraisalResult): void 
 function renderSoldComps(container: HTMLElement, data: AppraisalResult): void {
   const comps = [...data.soldComps];
   const predicted = data.retail.predicted;
+
+  if (comps.length === 0) {
+    container.innerHTML = `
+      <div class="placeholder" style="height:280px;">
+        <div class="placeholder-icon">&#x1F4CA;</div>
+        <div class="placeholder-text">No sold comps with usable pricing data</div>
+      </div>
+    `;
+    return;
+  }
 
   // Sort
   comps.sort((a, b) => {
@@ -1261,9 +1471,9 @@ function renderSoldComps(container: HTMLElement, data: AppraisalResult): void {
       </thead>
       <tbody>
         ${comps
-          .map((c) => {
-            const cls = c.price < predicted ? "below-predicted" : c.price > predicted ? "above-predicted" : "";
-            return `<tr class="${cls}">
+      .map((c) => {
+        const cls = c.price < predicted ? "below-predicted" : c.price > predicted ? "above-predicted" : "";
+        return `<tr class="${cls}">
               <td>${c.year} ${c.make} ${c.model} ${c.trim}</td>
               <td>${fmt$(c.price)}</td>
               <td>${fmtMi(c.miles)}</td>
@@ -1272,8 +1482,8 @@ function renderSoldComps(container: HTMLElement, data: AppraisalResult): void {
               <td>${c.distance}</td>
               <td>${c.sold_date}</td>
             </tr>`;
-          })
-          .join("")}
+      })
+      .join("")}
       </tbody>
     </table>
   `;
@@ -1323,14 +1533,22 @@ function drawHistoryChart(history: HistoryEntry[]): void {
   const ctx = canvas.getContext("2d")!;
   ctx.scale(dpr, dpr);
 
-  // Parse dates
+  // Parse dates and keep only entries we can meaningfully plot
   const entries = history.map((e) => ({
     ...e,
     startDate: new Date(e.first_seen),
     endDate: new Date(e.last_seen),
-  }));
+  })).filter((e) => Number.isFinite(e.price) && e.price > 0 && !Number.isNaN(e.startDate.getTime()) && !Number.isNaN(e.endDate.getTime()));
 
-  if (entries.length === 0) return;
+  if (entries.length === 0) {
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "13px -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("No priced history points available for this VIN", w / 2, h / 2);
+    return;
+  }
 
   const allDates = entries.flatMap((e) => [e.startDate.getTime(), e.endDate.getTime()]);
   const minDate = Math.min(...allDates);
@@ -1339,12 +1557,15 @@ function drawHistoryChart(history: HistoryEntry[]): void {
   const minPrice = Math.min(...allPrices) - 500;
   const maxPrice = Math.max(...allPrices) + 500;
 
+  const dateSpan = Math.max(1, maxDate - minDate);
+  const priceSpan = Math.max(1, maxPrice - minPrice);
+
   const pad = { top: 30, right: 30, bottom: 50, left: 70 };
   const plotW = w - pad.left - pad.right;
   const plotH = h - pad.top - pad.bottom;
 
-  const xScale = (d: number) => pad.left + ((d - minDate) / (maxDate - minDate)) * plotW;
-  const yScale = (p: number) => pad.top + plotH - ((p - minPrice) / (maxPrice - minPrice)) * plotH;
+  const xScale = (d: number) => pad.left + ((d - minDate) / dateSpan) * plotW;
+  const yScale = (p: number) => pad.top + plotH - ((p - minPrice) / priceSpan) * plotH;
 
   // Background
   ctx.fillStyle = "#1e293b";
