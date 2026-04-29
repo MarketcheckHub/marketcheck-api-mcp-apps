@@ -39,6 +39,24 @@ function _proxyBase(): string {
   return location.protocol.startsWith("http") ? "" : "http://localhost:3001";
 }
 
+// ── Direct MarketCheck API Client (browser → api.marketcheck.com) ──────
+const _MC = "https://api.marketcheck.com";
+async function _mcApi(path: string, params: Record<string, any> = {}): Promise<any> {
+  const auth = _getAuth();
+  if (!auth.value) return null;
+  const prefix = path.startsWith("/api/") ? "" : "/v2";
+  const url = new URL(_MC + prefix + path);
+  if (auth.mode === "api_key") url.searchParams.set("api_key", auth.value);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = {};
+  if (auth.mode === "oauth_token") headers["Authorization"] = "Bearer " + auth.value;
+  const res = await fetch(url.toString(), { headers });
+  if (!res.ok) throw new Error("MC API " + res.status);
+  return res.json();
+}
+
 async function _callTool(toolName: string, args: Record<string, any>): Promise<any> {
   if (_safeApp) {
     try {
@@ -686,26 +704,23 @@ function drawSegmentDonut(canvas: HTMLCanvasElement, loans: Loan[]): void {
 // ── Live Data Fetch ───────────────────────────────────────────────────
 
 async function _fetchDirect(state?: string): Promise<{ heatmapData: HeatmapCell[] } | null> {
-  const auth = _getAuth();
-  if (!auth.value) return null;
+  if (!_getAuth().value) return null;
 
   try {
-    const makeParam = `ranking_dimensions=make&ranking_measure=average_sale_price&ranking_order=desc&top_n=10&inventory_type=used`;
-    const stateQ = state ? `&state=${encodeURIComponent(state)}` : "";
-    const authQ = auth.mode === "api_key" ? `&api_key=${encodeURIComponent(auth.value)}` : `&access_token=${encodeURIComponent(auth.value)}`;
-    const base = _proxyBase();
+    const baseParams = {
+      ranking_dimensions: "make",
+      ranking_measure: "average_sale_price",
+      ranking_order: "desc",
+      top_n: "10",
+      inventory_type: "used",
+      ...(state ? { state } : {}),
+    };
 
     // Fetch by-make data for 0-2 yr, 2-4 yr, 4-6 yr age buckets
-    const [r0, r2, r4] = await Promise.all([
-      fetch(`${base}/api/v1/sold-vehicles/summary?${makeParam}&year_min=2023&year_max=2026${stateQ}${authQ}`),
-      fetch(`${base}/api/v1/sold-vehicles/summary?${makeParam}&year_min=2021&year_max=2022${stateQ}${authQ}`),
-      fetch(`${base}/api/v1/sold-vehicles/summary?${makeParam}&year_min=2019&year_max=2020${stateQ}${authQ}`),
-    ]);
-
     const [d0, d2, d4] = await Promise.all([
-      r0.ok ? r0.json() : null,
-      r2.ok ? r2.json() : null,
-      r4.ok ? r4.json() : null,
+      _mcApi("/api/v1/sold-vehicles/summary", { ...baseParams, year_min: 2023, year_max: 2026 }),
+      _mcApi("/api/v1/sold-vehicles/summary", { ...baseParams, year_min: 2021, year_max: 2022 }),
+      _mcApi("/api/v1/sold-vehicles/summary", { ...baseParams, year_min: 2019, year_max: 2020 }),
     ]);
 
     // Build heatmap from rankings
