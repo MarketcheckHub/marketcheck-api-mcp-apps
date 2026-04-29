@@ -822,11 +822,13 @@ function applyLiveDataToLoans(loans: Loan[], liveData: LiveData): void {
   let heatmapData = generateHeatmapData();
 
   // Fetch live market data and apply to all loans if API key is present
+  let liveDataLoaded = false;
   if (mode === "live" || mode === "mcp") {
     const liveData = await _fetchDirect(state);
     if (liveData) {
       heatmapData = liveData.heatmapData;
       applyLiveDataToLoans(loans, liveData);
+      liveDataLoaded = true;
     }
   }
 
@@ -849,6 +851,18 @@ function applyLiveDataToLoans(loans: Loan[], liveData: LiveData): void {
   `;
   el.appendChild(header);
   _addSettingsBar(header);
+
+  // Enterprise API fallback notice
+  if ((mode === "live" || mode === "mcp") && !liveDataLoaded) {
+    const notice = document.createElement("div");
+    notice.style.cssText = "background:linear-gradient(135deg,#1e3a5f22,#3b82f611);border:1px solid #3b82f644;border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;";
+    notice.innerHTML = `<span style="font-size:16px;">&#8505;</span>
+      <div>
+        <span style="font-size:13px;font-weight:600;color:#60a5fa;">Showing sample data</span>
+        <span style="font-size:12px;color:#64748b;margin-left:6px;">— Live depreciation data requires an Enterprise API key (<a href="https://developers.marketcheck.com" target="_blank" style="color:#60a5fa;">upgrade</a>)</span>
+      </div>`;
+    el.appendChild(notice);
+  }
 
   // VIN Input Area
   const vinSection = document.createElement("div");
