@@ -838,17 +838,6 @@ function applyLiveDataToLoans(loans: Loan[], liveData: LiveData): void {
   const loans = generateMockLoans();
   let heatmapData = generateHeatmapData();
 
-  // Fetch live market data and apply to all loans if API key is present
-  let liveDataLoaded = false;
-  if (mode === "live" || mode === "mcp") {
-    const liveData = await _fetchDirect(state);
-    if (liveData) {
-      heatmapData = liveData.heatmapData;
-      applyLiveDataToLoans(loans, liveData);
-      liveDataLoaded = true;
-    }
-  }
-
   const el = document.body;
   el.style.fontFamily = "system-ui, -apple-system, sans-serif";
   el.style.background = "#0f172a";
@@ -869,17 +858,17 @@ function applyLiveDataToLoans(loans: Loan[], liveData: LiveData): void {
   el.appendChild(header);
   _addSettingsBar(header);
 
-  // Enterprise API fallback notice
-  if ((mode === "live" || mode === "mcp") && !liveDataLoaded) {
-    const notice = document.createElement("div");
-    notice.style.cssText = "background:linear-gradient(135deg,#1e3a5f22,#3b82f611);border:1px solid #3b82f644;border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;";
-    notice.innerHTML = `<span style="font-size:16px;">&#8505;</span>
-      <div>
-        <span style="font-size:13px;font-weight:600;color:#60a5fa;">Showing sample data</span>
-        <span style="font-size:12px;color:#64748b;margin-left:6px;">— Live depreciation data requires an Enterprise API key (<a href="https://developers.marketcheck.com" target="_blank" style="color:#60a5fa;">upgrade</a>)</span>
-      </div>`;
-    el.appendChild(notice);
+  // Loading notice — shown while API fetches, replaced when done
+  const apiNotice = document.createElement("div");
+  apiNotice.style.cssText = "margin-bottom:16px;";
+  if (mode === "live" || mode === "mcp") {
+    apiNotice.innerHTML = `<div style="background:linear-gradient(135deg,#1e3a5f22,#3b82f611);border:1px solid #3b82f644;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:10px;">
+      <span style="font-size:14px;animation:spin 1s linear infinite;display:inline-block;">&#8987;</span>
+      <span style="font-size:13px;color:#60a5fa;font-weight:600;">Fetching live market data…</span>
+    </div>
+    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
   }
+  el.appendChild(apiNotice);
 
   // VIN Input Area
   const vinSection = document.createElement("div");
@@ -937,11 +926,44 @@ function applyLiveDataToLoans(loans: Loan[], liveData: LiveData): void {
 
   el.appendChild(bottomRow);
 
-  // Draw canvases after DOM attachment
+  // ── Render immediately with mock data ─────────────────────────────────
   requestAnimationFrame(() => {
     drawLTVHistogram(histCanvas, loans);
     drawSegmentDonut(donutCanvas, loans);
   });
+
+  // ── Fetch live data in background, patch UI when ready ────────────────
+  if (mode === "live" || mode === "mcp") {
+    _fetchDirect(state).then(liveData => {
+      if (liveData) {
+        applyLiveDataToLoans(loans, liveData);
+        // Patch KPIs
+        kpiSection.innerHTML = renderKPIs(loans);
+        // Patch watchlist
+        watchContainer.innerHTML = renderWatchlistTable(loans);
+        // Patch heatmap
+        heatmapContainer.innerHTML = renderDepreciationHeatmap(liveData.heatmapData);
+        // Redraw canvases
+        drawLTVHistogram(histCanvas, loans);
+        drawSegmentDonut(donutCanvas, loans);
+        // Update notice: success
+        apiNotice.innerHTML = `<div style="background:linear-gradient(135deg,#05966922,#10b98111);border:1px solid #10b98144;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:8px;">
+          <span style="color:#34d399;font-size:14px;">&#10003;</span>
+          <span style="font-size:12px;color:#34d399;font-weight:600;">Live market data loaded</span>
+        </div>`;
+        setTimeout(() => { apiNotice.style.display = "none"; }, 3000);
+      } else {
+        // Enterprise key required or API failed
+        apiNotice.innerHTML = `<div style="background:linear-gradient(135deg,#1e3a5f22,#3b82f611);border:1px solid #3b82f644;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:14px;">&#8505;</span>
+          <span style="font-size:12px;color:#60a5fa;font-weight:600;">Showing sample data</span>
+          <span style="font-size:12px;color:#64748b;margin-left:4px;">— Live depreciation data requires an Enterprise API key (<a href="https://developers.marketcheck.com" target="_blank" style="color:#60a5fa;">upgrade</a>)</span>
+        </div>`;
+      }
+    });
+  } else {
+    apiNotice.style.display = "none";
+  }
 
   // VIN analyze button handler — shows inline results panel
   const vinBtn = el.querySelector("#vin-btn") as HTMLButtonElement | null;
