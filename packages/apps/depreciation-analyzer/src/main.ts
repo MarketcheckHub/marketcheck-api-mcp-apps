@@ -1181,27 +1181,37 @@ function renderCurveChart() {
     ctx.fill();
     ctx.stroke();
 
+    // Header row — middle-aligned within the header slot
+    const headerCY = ty + ROW_H / 2;
     ctx.fillStyle = TEXT_PRIMARY;
     ctx.font = "bold 11px -apple-system, sans-serif";
     ctx.textAlign = "left";
-    ctx.fillText(`Month ${hoveredMonth}`, tx + PAD_X, ty + 16);
+    ctx.textBaseline = "middle";
+    ctx.fillText(`Month ${hoveredMonth}`, tx + PAD_X, headerCY);
 
     currentData.models.forEach((md, idx) => {
       const pt = md.monthlyData.find((p) => p.month === hoveredMonth);
       if (!pt) return;
       const color = COLORS[idx % COLORS.length];
-      const rowY = ty + 16 + ROW_H + idx * ROW_H;
+      // Center y for this data row, sitting below the header slot
+      const rowCY = ty + ROW_H + (idx + 0.5) * ROW_H;
+
+      // Dot — centered on rowCY
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(tx + PAD_X + 3, rowY + 1, 4, 0, Math.PI * 2);
+      ctx.arc(tx + PAD_X + 4, rowCY, 4, 0, Math.PI * 2);
       ctx.fill();
 
+      // Text — middle-aligned to the same rowCY so dot and label sit on the same axis
       ctx.fillStyle = TEXT_SECONDARY;
       ctx.font = "11px -apple-system, sans-serif";
+      ctx.textBaseline = "middle";
       const label = `${md.model.make} ${md.model.model}`;
       const val = showPctOfMsrp ? `${pt.pctOfMsrp}%` : `$${pt.avgPrice.toLocaleString()}`;
-      ctx.fillText(`${label}: ${val}`, tx + PAD_X + DOT_W, rowY + 5);
+      ctx.fillText(`${label}: ${val}`, tx + PAD_X + DOT_W, rowCY);
     });
+
+    ctx.textBaseline = "alphabetic"; // restore default
   }
 
   // Mouse tracking
