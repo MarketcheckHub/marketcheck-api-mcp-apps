@@ -169,8 +169,29 @@ async function _fetchDirect(): Promise<any> {
   const priceMovers = priceMoversAll.slice(0, 10);
 
   const segColors = ["#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#10b981", "#6b7280", "#06b6d4", "#a855f7"];
+
+  // ── Segment Mix ──────────────────────────────────────────────────────
+  // Primary: dedicated body_type summary call (byBody).
+  // Fallback: aggregate body_type from the make+model rows (already loaded).
+  function _buildSegmentMix(rows: any[]): SegmentSlice[] {
+    const totals: Record<string, number> = {};
+    for (const r of rows) {
+      const bt = r.body_type;
+      if (bt && r.sold_count) totals[bt] = (totals[bt] ?? 0) + r.sold_count;
+    }
+    const grand = Object.values(totals).reduce((s, v) => s + v, 0);
+    return Object.entries(totals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([label, count], i) => ({
+        label, count,
+        pct: grand > 0 ? +((count / grand) * 100).toFixed(1) : 0,
+        color: segColors[i % segColors.length],
+      }));
+  }
+
   const totalBody = bodyRows.reduce((s, r) => s + (r.sold_count ?? 0), 0);
-  const segmentMix = bodyRows
+  const segFromBody = bodyRows
     .filter((r) => r.body_type)
     .sort((a, b) => (b.sold_count ?? 0) - (a.sold_count ?? 0))
     .slice(0, 6)
@@ -179,15 +200,40 @@ async function _fetchDirect(): Promise<any> {
       pct: totalBody > 0 ? +((r.sold_count / totalBody) * 100).toFixed(1) : 0,
       color: segColors[i % segColors.length],
     }));
+  const segmentMix = segFromBody.length ? segFromBody : _buildSegmentMix(modelRowsCurr);
 
-  let brandResiduals = makeRows
-    .filter((r) => r.make && r.price_over_msrp_percentage !== undefined)
-    .slice(0, 15)
-    .map((r) => ({
-      brand: r.make,
-      pctMsrpRetained: +(100 + (r.price_over_msrp_percentage ?? 0)).toFixed(1),
-    }))
-    .sort((a, b) => b.pctMsrpRetained - a.pctMsrpRetained);
+  // ── Brand Residual Value ─────────────────────────────────────────────
+  // Primary: dedicated make-level summary call (byMakeCurr) using
+  //   average_sale_price / avg_msrp * 100  (direct ratio, not the pct field).
+  // Fallback: aggregate weighted avg from make+model rows.
+  function _buildBrandResiduals(rows: any[]): BrandResidual[] {
+    // Weighted aggregation: Σ(sale_price * sold_count) / Σ(msrp * sold_count) per make
+    const agg: Record<string, { saleSum: number; msrpSum: number }> = {};
+    for (const r of rows) {
+      if (!r.make) continue;
+      const cnt = r.sold_count ?? 0;
+      const sale = r.average_sale_price ?? 0;
+      const msrp = r.avg_msrp ?? 0;
+      if (cnt === 0 || sale === 0 || msrp === 0) continue;
+      if (!agg[r.make]) agg[r.make] = { saleSum: 0, msrpSum: 0 };
+      agg[r.make].saleSum += sale * cnt;
+      agg[r.make].msrpSum += msrp * cnt;
+    }
+    return Object.entries(agg)
+      .filter(([_, v]) => v.msrpSum > 0)
+      .map(([brand, v]) => ({
+        brand,
+        pctMsrpRetained: +(v.saleSum / v.msrpSum * 100).toFixed(1),
+      }))
+      .filter((r) => r.pctMsrpRetained >= 50 && r.pctMsrpRetained <= 130)
+      .sort((a, b) => b.pctMsrpRetained - a.pctMsrpRetained)
+      .slice(0, 15);
+  }
+
+  const brandResidualsFromMake = _buildBrandResiduals(makeRows);
+  const brandResiduals = brandResidualsFromMake.length
+    ? brandResidualsFromMake
+    : _buildBrandResiduals(modelRowsCurr);
 
   const stateRanking = stateRows
     .filter((r) => r.state)
@@ -424,6 +470,23 @@ const STATES = [
   "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY",
   "NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"
 ];
+
+const STATE_NAMES: Record<string, string> = {
+  "National": "National (All States)",
+  "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+  "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+  "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+  "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+  "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+  "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+  "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+  "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+  "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+  "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+  "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+  "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+  "WI": "Wisconsin", "WY": "Wyoming",
+};
 
 let filters: FilterState = {
   period: "90d",
@@ -693,12 +756,19 @@ function buildFilterBar(): HTMLElement {
     background:#1e293b;border-radius:10px;padding:12px 16px;margin-bottom:16px;
   `;
 
+  const divider = () => {
+    const d = document.createElement("div");
+    d.style.cssText = `width:1px;height:28px;background:#334155;align-self:center;flex-shrink:0;`;
+    return d;
+  };
+
   // Period pills
   const periodGroup = pillGroup("Period", ["30d", "60d", "90d", "6M", "1Y"], filters.period, (v) => {
     filters.period = v;
     fetchData();
   });
   bar.appendChild(periodGroup);
+  bar.appendChild(divider());
 
   // Geography dropdown
   const geoWrap = document.createElement("div");
@@ -712,19 +782,23 @@ function buildFilterBar(): HTMLElement {
     background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:6px;
     padding:6px 10px;font-size:13px;cursor:pointer;outline:none;
   `;
+  sel.title = STATE_NAMES[filters.geography] ?? filters.geography;
   STATES.forEach((s) => {
     const opt = document.createElement("option");
     opt.value = s;
     opt.textContent = s;
+    opt.title = STATE_NAMES[s] ?? s;
     if (s === filters.geography) opt.selected = true;
     sel.appendChild(opt);
   });
   sel.addEventListener("change", () => {
     filters.geography = sel.value;
+    sel.title = STATE_NAMES[sel.value] ?? sel.value;
     fetchData();
   });
   geoWrap.appendChild(sel);
   bar.appendChild(geoWrap);
+  bar.appendChild(divider());
 
   // Inventory Type toggle
   bar.appendChild(
@@ -742,6 +816,7 @@ function buildFilterBar(): HTMLElement {
       fetchData();
     })
   );
+  bar.appendChild(divider());
 
   // Fuel type chips
   bar.appendChild(
@@ -1236,11 +1311,11 @@ function buildStateTable(): HTMLElement {
   const table = document.createElement("table");
   table.style.cssText = `width:100%;border-collapse:collapse;font-size:13px;`;
 
-  const cols: { key: keyof StateRankRow; label: string; align: string }[] = [
-    { key: "state", label: "State", align: "left" },
-    { key: "avgPrice", label: "Avg Price", align: "right" },
-    { key: "volume", label: "Volume", align: "right" },
-    { key: "avgDom", label: "Avg DOM", align: "right" },
+  const cols: { key: keyof StateRankRow; label: string; align: string; tooltip: string }[] = [
+    { key: "state",    label: "State",     align: "left",  tooltip: "US state \u2014 click a row to filter the dashboard to that state" },
+    { key: "avgPrice", label: "Avg Price", align: "right", tooltip: "Average sale price across all transactions recorded in this state" },
+    { key: "volume",   label: "Volume",    align: "right", tooltip: "Total number of vehicles sold in this state during the selected period" },
+    { key: "avgDom",   label: "Avg DOM",   align: "right", tooltip: "Average Days on Market \u2014 how long vehicles typically sit on the lot before selling. Lower is hotter." },
   ];
 
   const thead = document.createElement("thead");
@@ -1252,6 +1327,7 @@ function buildStateTable(): HTMLElement {
       text-align:${col.align};padding:8px 6px;color:#94a3b8;font-weight:600;
       font-size:11px;text-transform:uppercase;cursor:pointer;user-select:none;
     `;
+    th.title = col.tooltip;
     const sortIndicator =
       stateSortCol === col.key ? (stateSortDir === "asc" ? " \u25B2" : " \u25BC") : "";
     th.textContent = col.label + sortIndicator;
@@ -1275,12 +1351,18 @@ function buildStateTable(): HTMLElement {
     tr.style.cssText = `border-bottom:1px solid rgba(51,65,85,0.5);`;
     tr.addEventListener("mouseenter", () => (tr.style.background = "#334155"));
     tr.addEventListener("mouseleave", () => (tr.style.background = "transparent"));
-    tr.innerHTML = `
-      <td style="padding:7px 6px;color:#f1f5f9;font-weight:600;">${r.state}</td>
+
+    const stateTd = document.createElement("td");
+    stateTd.style.cssText = `padding:7px 6px;color:#f1f5f9;font-weight:600;`;
+    stateTd.textContent = r.state;
+    stateTd.title = STATE_NAMES[r.state] ?? r.state;
+
+    tr.appendChild(stateTd);
+    tr.insertAdjacentHTML("beforeend", `
       <td style="padding:7px 6px;text-align:right;color:#cbd5e1;">${fmt$(r.avgPrice)}</td>
       <td style="padding:7px 6px;text-align:right;color:#cbd5e1;">${fmtN(r.volume)}</td>
       <td style="padding:7px 6px;text-align:right;color:#cbd5e1;">${r.avgDom}d</td>
-    `;
+    `);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
