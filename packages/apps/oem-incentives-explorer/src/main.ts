@@ -127,19 +127,24 @@ function _mapApiIncentives(make: string, raw: any): Incentive[] {
   });
 }
 
-async function _fetchDirect(args): Promise<SearchResult> {
-  const primaryRaw = await _mcIncentives({ oem: args.make, zip: args.zip, model: args.model });
-  const results: IncentiveResult[] = [
-    { make: args.make, incentives: _mapApiIncentives(args.make, primaryRaw) },
-  ];
-  if (args.compareMakes?.length) {
-    const compare = await Promise.all(args.compareMakes.map(async (make: string) => {
-      const raw = await _mcIncentives({ oem: make, zip: args.zip });
-      return { make, incentives: _mapApiIncentives(make, raw) };
-    }));
-    results.push(...compare);
-  }
+async function _fetchDirect(args): Promise<{ results: { make: string; raw: any }[]; zip: string }> {
+  const makes: string[] = [args.make, ...(Array.isArray(args.compareMakes) ? args.compareMakes : [])].filter(Boolean);
+  const results = await Promise.all(makes.map(async (make: string) => {
+    const params: any = { oem: make, zip: args.zip };
+    if (make === args.make && args.model) params.model = args.model;
+    try { return { make, raw: await _mcIncentives(params) }; }
+    catch (e) { console.warn(`[oem-incentives-explorer] direct fetch make=${make} failed:`, (e as Error)?.message); return { make, raw: null }; }
+  }));
   return { results, zip: args.zip || "" };
+}
+
+function _mapRawResultsToSearchResult(parsed: any, fallbackZip: string): SearchResult | null {
+  if (!parsed || !Array.isArray(parsed.results)) return null;
+  const results: IncentiveResult[] = parsed.results.map((r: any) => ({
+    make: r.make,
+    incentives: _mapApiIncentives(r.make, r.raw),
+  }));
+  return { results, zip: parsed.zip || fallbackZip };
 }
 
 async function _callTool(toolName, args) {
@@ -1557,11 +1562,23 @@ async function doSearch(): Promise<void> {
     });
 
     let parsed: SearchResult | null = null;
+    let allCallsFailed = false;
     if (result && typeof result === "object") {
       const text = "content" in result
         ? (result as any).content?.map((c: any) => c.text || "").join("") || ""
         : JSON.stringify(result);
-      try { parsed = JSON.parse(text); } catch {}
+      let raw: any = null;
+      try { raw = JSON.parse(text); } catch {}
+      // Server returns raw API responses keyed by make: {results:[{make, raw}], zip}.
+      // Map them client-side so the same Incentive[] shape is used for proxy and direct paths.
+      if (raw && Array.isArray(raw.results) && raw.results.some((r: any) => "raw" in r)) {
+        // Per-make catches turn upstream failures into raw:null. If every make failed,
+        // surface as "threw" rather than the misleading "empty" banner.
+        allCallsFailed = raw.results.length > 0 && raw.results.every((r: any) => r.raw === null);
+        parsed = _mapRawResultsToSearchResult(raw, zipCode || "");
+      } else {
+        parsed = raw;
+      }
     }
 
     const hasRealData = !!(parsed && parsed.results && parsed.results.some(r => r.incentives.length > 0));
@@ -1570,11 +1587,15 @@ async function doSearch(): Promise<void> {
       for (const r of parsed!.results) r.incentives = r.incentives.map(_normalizeIncentiveDisplay);
       currentResults = parsed;
     } else if (mode === "live") {
-      // Live mode returned no usable data — surface this instead of silently showing mock.
-      apiError = {
-        kind: "empty",
-        message: "The incentives API returned no offers for the requested brand(s). This can happen if your key lacks access to the /v2/search/car/incentive/oem endpoint, or the endpoint returned an empty listings array.",
-      };
+      apiError = allCallsFailed
+        ? {
+            kind: "threw",
+            message: "Live API call failed for every requested brand. Check your API key and that it has access to /v2/search/car/incentive/oem.",
+          }
+        : {
+            kind: "empty",
+            message: "The incentives API returned no offers for the requested brand(s). This can happen if your key lacks access to the /v2/search/car/incentive/oem endpoint, or the endpoint returned an empty listings array.",
+          };
       currentResults = null;
     } else {
       // Demo / MCP — mock fallback is the intended behavior.

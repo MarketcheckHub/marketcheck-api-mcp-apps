@@ -139,12 +139,23 @@ const compositeHandlers: Record<string, (auth: any, args: any) => Promise<any>> 
     return { decode, activeComps, soldComps, prediction };
   },
   "oem-incentives-explorer": async (auth, args) => {
-    const incentives = await handleIncentives(auth, { oem: args.make, zip: args.zip, model: args.model });
-    let compareIncentives: any[] = [];
-    if (args.compareMakes?.length) {
-      compareIncentives = await Promise.all(args.compareMakes.map(async (make: string) => ({ make, data: await handleIncentives(auth, { oem: make, zip: args.zip }) })));
-    }
-    return { make: args.make, incentives, compareIncentives };
+    const makes: string[] = [args.make, ...(Array.isArray(args.compareMakes) ? args.compareMakes : [])].filter(Boolean);
+    const results = await Promise.all(makes.map(async (make: string) => {
+      const params: any = { oem: make, zip: args.zip };
+      if (make === args.make && args.model) params.model = args.model;
+      try { return { make, raw: await handleIncentives(auth, params) }; }
+      catch (e: any) { console.warn(`[oem-incentives-explorer] make=${make} failed: ${e?.message}`); return { make, raw: null }; }
+    }));
+    return { results, zip: args.zip || "" };
+  },
+  "find-incentive-deals": async (auth, args) => {
+    const makesArg: string = args.makes || "Toyota,Honda,Ford,Chevrolet,Hyundai,Kia,Nissan,BMW,Mercedes-Benz,Volkswagen";
+    const makes = makesArg.split(",").map((m: string) => m.trim()).filter(Boolean);
+    const results = await Promise.all(makes.map(async (make: string) => {
+      try { return { make, data: await handleIncentives(auth, { oem: make, zip: args.zip }) }; }
+      catch (e: any) { console.warn(`[find-incentive-deals] make=${make} failed: ${e?.message}`); return { make, data: null }; }
+    }));
+    return { results };
   },
 };
 
