@@ -1150,9 +1150,26 @@ function renderCurveChart() {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Tooltip
-    const tooltipW = 160;
-    const tooltipH = 20 + currentData.models.length * 18;
+    // Tooltip — measure text first so the box always fits
+    const ROW_H = 20;
+    const PAD_X = 12;  // horizontal inner padding each side
+    const DOT_W = 18;  // dot + gap before text
+
+    // Measure widest content line
+    ctx.font = "bold 11px -apple-system, sans-serif";
+    let maxTextW = ctx.measureText(`Month ${hoveredMonth}`).width;
+    ctx.font = "11px -apple-system, sans-serif";
+    currentData.models.forEach((md) => {
+      const pt = md.monthlyData.find((p) => p.month === hoveredMonth);
+      if (!pt) return;
+      const label = `${md.model.make} ${md.model.model}`;
+      const val = showPctOfMsrp ? `${pt.pctOfMsrp}%` : `$${pt.avgPrice.toLocaleString()}`;
+      const w2 = ctx.measureText(`${label}: ${val}`).width;
+      if (w2 > maxTextW) maxTextW = w2;
+    });
+
+    const tooltipW = DOT_W + maxTextW + PAD_X * 2;
+    const tooltipH = 12 + ROW_H + currentData.models.length * ROW_H + 8; // header + rows + bottom pad
     let tx = x + 12;
     if (tx + tooltipW > w - pad.right) tx = x - tooltipW - 12;
     const ty = pad.top + 10;
@@ -1167,22 +1184,23 @@ function renderCurveChart() {
     ctx.fillStyle = TEXT_PRIMARY;
     ctx.font = "bold 11px -apple-system, sans-serif";
     ctx.textAlign = "left";
-    ctx.fillText(`Month ${hoveredMonth}`, tx + 10, ty + 14);
+    ctx.fillText(`Month ${hoveredMonth}`, tx + PAD_X, ty + 16);
 
     currentData.models.forEach((md, idx) => {
       const pt = md.monthlyData.find((p) => p.month === hoveredMonth);
       if (!pt) return;
       const color = COLORS[idx % COLORS.length];
+      const rowY = ty + 16 + ROW_H + idx * ROW_H;
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(tx + 10, ty + 30 + idx * 18, 4, 0, Math.PI * 2);
+      ctx.arc(tx + PAD_X + 3, rowY + 1, 4, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = TEXT_SECONDARY;
       ctx.font = "11px -apple-system, sans-serif";
       const label = `${md.model.make} ${md.model.model}`;
       const val = showPctOfMsrp ? `${pt.pctOfMsrp}%` : `$${pt.avgPrice.toLocaleString()}`;
-      ctx.fillText(`${label}: ${val}`, tx + 20, ty + 34 + idx * 18);
+      ctx.fillText(`${label}: ${val}`, tx + PAD_X + DOT_W, rowY + 5);
     });
   }
 
