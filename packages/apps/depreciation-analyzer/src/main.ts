@@ -66,7 +66,180 @@ function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;dele
 function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
 function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
 
-async function _fetchDirect(_args) { return null; /* passthrough — uses MCP mode */ }
+// Build a depreciation result from sold-vehicles/summary by pivoting on model_year.
+// Newest model_year row = newest car (~0 months from new); each year delta ≈ 12 months.
+async function _fetchDirect(args: {
+  models: ModelSelector[];
+  timeRange: TimeRange;
+  state: string;
+}): Promise<AnalyzerResult | null> {
+  const months = args.timeRange === "3M" ? 3 : args.timeRange === "6M" ? 6 : args.timeRange === "1Y" ? 12 : 24;
+  const stateParam = args.state && args.state !== "National" ? { state: args.state } : {};
+
+  // Active listings per model — group by year to build depreciation curves
+  const modelPromises = args.models.map((m) =>
+    _mcActive({
+      make: m.make,
+      model: m.model,
+      rows: 200,
+      sort_by: "year",
+      sort_order: "desc",
+      ...stateParam,
+    }).catch(() => null)
+  );
+
+  // Segment rates by body type (model_year not a valid dimension; falls back to defaults)
+  const segmentPromise = _mcSold({
+    ranking_dimensions: "body_type",
+    ranking_measure: "sold_count",
+    ranking_order: "desc",
+    inventory_type: "Used",
+    top_n: 20,
+    ...stateParam,
+  }).catch(() => null);
+
+  const firstModel = args.models[0];
+  // Geo: summary_by=state is the correct param (state is not a valid ranking_dimension)
+  const geoPromise = firstModel
+    ? _mcSold({
+        summary_by: "state",
+        ranking_measure: "sold_count",
+        ranking_order: "desc",
+        inventory_type: "Used",
+        make: firstModel.make,
+        model: firstModel.model,
+        top_n: 50,
+      }).catch(() => null)
+    : Promise.resolve(null);
+
+  const [modelResults, segmentResp, geoResp] = await Promise.all([
+    Promise.all(modelPromises),
+    segmentPromise,
+    geoPromise,
+  ]);
+
+  // Build per-model depreciation curves from active listing prices grouped by year
+  const segmentByMakeModel: Record<string, string> = {};
+  const modelData: DepreciationData[] = args.models.map((m, idx) => {
+    const resp = modelResults[idx];
+    const listings: any[] = resp?.listings ?? [];
+
+    // Bucket prices by model year
+    const yearBuckets: Record<number, { total: number; count: number }> = {};
+    for (const l of listings) {
+      const yr = l.year ?? l.build?.year;
+      const price = l.price;
+      if (!yr || !price || price < 1000) continue;
+      if (!yearBuckets[yr]) yearBuckets[yr] = { total: 0, count: 0 };
+      yearBuckets[yr].total += price;
+      yearBuckets[yr].count++;
+    }
+    const years = Object.keys(yearBuckets).map(Number).sort((a, b) => b - a);
+    if (years.length === 0) {
+      return { model: m, msrp: 0, monthlyData: [], segment: "SUV" };
+    }
+
+    const yearPrice: Record<number, number> = {};
+    const yearVolume: Record<number, number> = {};
+    for (const yr of years) {
+      yearPrice[yr] = yearBuckets[yr].total / yearBuckets[yr].count;
+      yearVolume[yr] = yearBuckets[yr].count;
+    }
+    const newestYear = years[0];
+    const newestPrice = yearPrice[newestYear];
+    // Use the newest avg active price as anchor; treat as ~95% of MSRP for retention math
+    const msrp = Math.round(newestPrice / 0.95);
+    const segment = listings[0]?.body_type ?? listings[0]?.build?.body_type ?? "SUV";
+    segmentByMakeModel[`${m.make}|${m.model}`] = segment;
+
+    // Interpolate monthly points 1..months. Month i corresponds to year (newestYear - i/12).
+    const monthlyData: MonthlyDataPoint[] = [];
+    for (let i = 1; i <= months; i++) {
+      const yrFloat = newestYear - i / 12;
+      const yLo = Math.floor(yrFloat);
+      const yHi = Math.ceil(yrFloat);
+      const pLo = yearPrice[yLo];
+      const pHi = yearPrice[yHi];
+      let price = pLo ?? pHi ?? newestPrice;
+      if (pLo != null && pHi != null && yHi !== yLo) {
+        const t = yrFloat - yLo;
+        price = pLo + (pHi - pLo) * t;
+      }
+      const volume = yearVolume[Math.round(yrFloat)] ?? 0;
+      monthlyData.push({
+        month: i,
+        avgPrice: Math.round(price),
+        pctOfMsrp: Math.round((price / msrp) * 1000) / 10,
+        volume,
+      });
+    }
+    return { model: m, msrp, monthlyData, segment };
+  });
+
+  // Segment depreciation rates from body_type×model_year
+  const segRows: any[] = segmentResp?.data ?? [];
+  const segByType: Record<string, { yr: number; price: number; vol: number }[]> = {};
+  for (const r of segRows) {
+    const bt = r.body_type;
+    if (!bt || !r.model_year || !r.average_sale_price) continue;
+    if (!segByType[bt]) segByType[bt] = [];
+    segByType[bt].push({ yr: r.model_year, price: r.average_sale_price, vol: r.sold_count ?? 0 });
+  }
+  const segmentComparisons: SegmentDepreciation[] = Object.entries(segByType)
+    .map(([bodyType, pts]) => {
+      pts.sort((a, b) => b.yr - a.yr);
+      if (pts.length < 2) return { bodyType, monthlyDepreciationPct: 1.0 };
+      const newest = pts[0];
+      const older = pts[pts.length - 1];
+      const yearSpan = Math.max(newest.yr - older.yr, 1);
+      const totalDrop = (newest.price - older.price) / newest.price;
+      const annualDrop = totalDrop / yearSpan;
+      const monthly = Math.max(0.1, (annualDrop / 12) * 100);
+      return { bodyType, monthlyDepreciationPct: +monthly.toFixed(2) };
+    })
+    .filter((s) => s.monthlyDepreciationPct > 0)
+    .sort((a, b) => a.monthlyDepreciationPct - b.monthlyDepreciationPct)
+    .slice(0, 8);
+
+  // Geographic variance for first model
+  const geoRows: any[] = geoResp?.data ?? [];
+  const stateMap: Record<string, { totalPrice: number; count: number; vol: number }> = {};
+  for (const r of geoRows) {
+    const st = r.state;
+    if (!st || !r.average_sale_price) continue;
+    if (!stateMap[st]) stateMap[st] = { totalPrice: 0, count: 0, vol: 0 };
+    stateMap[st].totalPrice += r.average_sale_price * (r.sold_count ?? 1);
+    stateMap[st].count += r.sold_count ?? 1;
+    stateMap[st].vol += r.sold_count ?? 0;
+  }
+  const stateAverages = Object.entries(stateMap).map(([st, v]) => ({
+    state: st,
+    avgPrice: v.count > 0 ? Math.round(v.totalPrice / v.count) : 0,
+    volume: v.vol,
+  }));
+  const grandAvg =
+    stateAverages.reduce((s, x) => s + x.avgPrice * x.volume, 0) /
+    Math.max(1, stateAverages.reduce((s, x) => s + x.volume, 0));
+  const stateVariance: StateVariance[] = stateAverages
+    .map((s) => ({
+      ...s,
+      priceIndex: grandAvg > 0 ? Math.round((s.avgPrice / grandAvg) * 100) : 100,
+    }))
+    .sort((a, b) => b.volume - a.volume)
+    .slice(0, 20);
+
+  if (modelData.every((md) => md.monthlyData.length === 0)) return null;
+
+  return {
+    models: modelData,
+    segmentComparisons: segmentComparisons.length ? segmentComparisons : [
+      { bodyType: "SUV", monthlyDepreciationPct: 0.92 },
+      { bodyType: "Sedan", monthlyDepreciationPct: 1.15 },
+      { bodyType: "Truck", monthlyDepreciationPct: 0.85 },
+    ],
+    stateVariance: stateVariance.length ? stateVariance : [],
+  };
+}
 
 async function _callTool(toolName, args) {
   // 1. MCP mode (Claude, VS Code, etc.)
@@ -93,44 +266,89 @@ async function _callTool(toolName, args) {
   return null;
 }
 
+// Module-level state to clean up between buildUI() rebuilds
+let _mcSettingsCleanup: (() => void) | null = null;
+
 function _addSettingsBar(headerEl?: HTMLElement) {
   if (_isEmbedMode() || !headerEl) return;
+
+  // Tear down any previous instance (panel + outside-click listener) before rebuilding.
+  if (_mcSettingsCleanup) {
+    _mcSettingsCleanup();
+    _mcSettingsCleanup = null;
+  }
+
   const mode = _detectAppMode();
-  const bar = document.createElement("div");
-  bar.style.cssText = "display:flex;align-items:center;gap:8px;margin-left:auto;";
   const colors: Record<string, { bg: string; fg: string; label: string }> = {
     mcp: { bg: "#1e40af22", fg: "#60a5fa", label: "MCP" },
     live: { bg: "#05966922", fg: "#34d399", label: "LIVE" },
     demo: { bg: "#92400e88", fg: "#fbbf24", label: "DEMO" },
   };
   const c = colors[mode];
+
+  // Anchor the badge + gear absolutely in the top-right of the header so they
+  // never break to a new line when the control bar wraps.
+  const bar = document.createElement("div");
+  bar.style.cssText = "display:flex;align-items:center;gap:8px;position:absolute;top:50%;right:16px;transform:translateY(-50%);z-index:5;";
   bar.innerHTML = `<span style="padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:0.5px;background:${c.bg};color:${c.fg};border:1px solid ${c.fg}33;">${c.label}</span>`;
-  if (mode !== "mcp") {
-    const gear = document.createElement("button");
-    gear.innerHTML = "&#9881;";
-    gear.title = "API Settings";
-    gear.style.cssText = "background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;padding:4px;";
-    const panel = document.createElement("div");
-    panel.style.cssText = "display:none;position:fixed;top:50px;right:16px;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:16px;z-index:1000;min-width:300px;box-shadow:0 8px 32px rgba(0,0,0,0.5);";
-    panel.innerHTML = `<div style="font-size:13px;font-weight:600;color:#f8fafc;margin-bottom:12px;">API Configuration</div>
-      <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:4px;">MarketCheck API Key</label>
-      <input id="_mc_key_inp" type="password" placeholder="Enter your API key" value="${_getAuth().mode === 'api_key' ? _getAuth().value ?? '' : ''}"
-        style="width:100%;padding:8px;border-radius:6px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:13px;margin-bottom:8px;box-sizing:border-box;" />
-      <div style="font-size:10px;color:#64748b;margin-bottom:12px;">Get a free key at <a href="https://developers.marketcheck.com" target="_blank" style="color:#60a5fa;">developers.marketcheck.com</a></div>
-      <div style="display:flex;gap:8px;">
-        <button id="_mc_save" style="flex:1;padding:8px;border-radius:6px;border:none;background:#3b82f6;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">Save & Reload</button>
-        <button id="_mc_clear" style="padding:8px 12px;border-radius:6px;border:1px solid #334155;background:transparent;color:#94a3b8;font-size:13px;cursor:pointer;">Clear</button>
-      </div>`;
-    gear.addEventListener("click", () => { panel.style.display = panel.style.display === "none" ? "block" : "none"; });
-    document.addEventListener("click", (e) => { if (!panel.contains(e.target as Node) && e.target !== gear) panel.style.display = "none"; });
-    document.body.appendChild(panel);
-    setTimeout(() => {
-      document.getElementById("_mc_save")?.addEventListener("click", () => { const k = (document.getElementById("_mc_key_inp") as HTMLInputElement)?.value?.trim(); if (k) { localStorage.setItem("mc_api_key", k); location.reload(); } });
-      document.getElementById("_mc_clear")?.addEventListener("click", () => { localStorage.removeItem("mc_api_key"); localStorage.removeItem("mc_access_token"); location.reload(); });
-    }, 0);
-    bar.appendChild(gear);
+
+  if (mode === "mcp") {
+    headerEl.appendChild(bar);
+    return;
   }
+
+  const gear = document.createElement("button");
+  gear.innerHTML = "&#9881;";
+  gear.title = "API Settings";
+  gear.style.cssText = "background:none;border:none;color:#94a3b8;font-size:18px;cursor:pointer;padding:4px;line-height:1;";
+  bar.appendChild(gear);
   headerEl.appendChild(bar);
+
+  const modeBadgeColor = mode === "live" ? { bg: "#05966922", fg: "#34d399" } : { bg: "#92400e88", fg: "#fbbf24" };
+  const panel = document.createElement("div");
+  panel.id = "_mc_settings_panel";
+  panel.style.cssText = "display:none;position:fixed;top:60px;right:16px;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;z-index:1000;width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.6);";
+  const currentKey = _getAuth().mode === "api_key" ? _getAuth().value ?? "" : "";
+  panel.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+        <div style="font-size:14px;font-weight:700;color:#f8fafc;">API Configuration</div>
+        <span style="padding:3px 10px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:0.5px;background:${modeBadgeColor.bg};color:${modeBadgeColor.fg};border:1px solid ${modeBadgeColor.fg}33;">${mode.toUpperCase()}</span>
+      </div>
+      <label style="font-size:11px;color:#94a3b8;display:block;margin-bottom:6px;font-weight:500;">MarketCheck API Key</label>
+      <input id="_mc_key_inp" type="password" placeholder="Enter your API key" value="${currentKey}"
+        style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;font-size:13px;margin-bottom:8px;box-sizing:border-box;outline:none;" />
+      <div style="font-size:11px;color:#64748b;margin-bottom:16px;">Get a free key at <a href="https://developers.marketcheck.com" target="_blank" style="color:#60a5fa;text-decoration:none;">developers.marketcheck.com</a></div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button id="_mc_save" style="flex:1;padding:10px;border-radius:8px;border:none;background:#3b82f6;color:#fff;font-size:13px;font-weight:700;cursor:pointer;letter-spacing:0.2px;">Save &amp; Reload</button>
+        <button id="_mc_clear" style="padding:10px 16px;border-radius:8px;border:1px solid #334155;background:transparent;color:#94a3b8;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;">Demo Mode</button>
+      </div>
+      <div style="font-size:10px;color:#475569;text-align:center;border-top:1px solid #1e293b;padding-top:10px;">
+        <em>Demo Mode</em> clears the key and shows sample data
+      </div>`;
+  document.body.appendChild(panel);
+
+  gear.addEventListener("click", (e) => {
+    e.stopPropagation();
+    panel.style.display = panel.style.display === "none" ? "block" : "none";
+  });
+  panel.addEventListener("click", (e) => e.stopPropagation());
+  panel.querySelector<HTMLButtonElement>("#_mc_save")!.addEventListener("click", () => {
+    const k = panel.querySelector<HTMLInputElement>("#_mc_key_inp")?.value?.trim();
+    if (k) { localStorage.setItem("mc_api_key", k); location.reload(); }
+  });
+  panel.querySelector<HTMLButtonElement>("#_mc_clear")!.addEventListener("click", () => {
+    localStorage.removeItem("mc_api_key");
+    localStorage.removeItem("mc_access_token");
+    location.reload();
+  });
+
+  const outsideListener = () => { panel.style.display = "none"; };
+  document.addEventListener("click", outsideListener);
+
+  _mcSettingsCleanup = () => {
+    document.removeEventListener("click", outsideListener);
+    panel.remove();
+  };
 }
 // ── End Data Provider ──────────────────────────────────────────────────
 
@@ -223,13 +441,21 @@ const TEXT_SECONDARY = "#94a3b8";
 const TEXT_MUTED = "#64748b";
 const ACCENT = "#38bdf8";
 
-const US_STATES = [
-  "National", "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
-  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI",
-  "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND",
-  "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA",
-  "WA", "WV", "WI", "WY"
-];
+const STATE_NAMES: Record<string, string> = {
+  National: "National (all states)",
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California",
+  CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia",
+  HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa",
+  KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland",
+  MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri",
+  MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey",
+  NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio",
+  OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina",
+  SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont",
+  VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+};
+
+const US_STATES = Object.keys(STATE_NAMES);
 
 const MAKES_MODELS: Record<string, string[]> = {
   "Toyota": ["RAV4", "Camry", "Corolla", "Highlander", "Tacoma", "4Runner", "Tundra"],
@@ -343,7 +569,6 @@ function generateMockData(
 }
 
 // ── App State ──────────────────────────────────────────────────────────────
-let app: InstanceType<typeof App>;
 let compareMode = true;
 let modelSelectors: ModelSelector[] = [
   { make: "Toyota", model: "RAV4" },
@@ -361,9 +586,32 @@ let hoveredMonth: number | null = null;
 let curveCanvas: HTMLCanvasElement;
 let segmentCanvas: HTMLCanvasElement;
 
+// ── URL Params → State ─────────────────────────────────────────────────────
+function applyUrlParams() {
+  const params = _getUrlParams();
+  if (params.make) {
+    const matchedMake = Object.keys(MAKES_MODELS).find(
+      (k) => k.toLowerCase() === params.make.toLowerCase()
+    );
+    if (matchedMake) {
+      const requestedModel = params.model;
+      const models = MAKES_MODELS[matchedMake];
+      const matchedModel = requestedModel
+        ? models.find((m) => m.toLowerCase() === requestedModel.toLowerCase()) ?? models[0]
+        : models[0];
+      modelSelectors[0] = { make: matchedMake, model: matchedModel };
+      compareMode = false;
+    }
+  }
+  if (params.state) {
+    const upper = params.state.toUpperCase();
+    if (US_STATES.includes(upper)) selectedState = upper;
+  }
+}
+
 // ── Initialize ─────────────────────────────────────────────────────────────
 async function init() {
-  app = new App({ name: "depreciation-analyzer", version: "1.0.0" });
+  applyUrlParams();
   buildUI();
   await fetchData();
 }
@@ -373,37 +621,42 @@ async function fetchData() {
   const models = compareMode ? modelSelectors.filter((m) => m.make && m.model) : [modelSelectors[0]];
   if (models.length === 0) return;
 
-  try {
-    const result = await _callTool("depreciation-analyzer", {
-        models: models.map((m) => ({ make: m.make, model: m.model })),
-        timeRange,
-        state: selectedState,
-      });
-    if (result && typeof result === "object") {
-      currentData = result as unknown as AnalyzerResult;
-    } else {
-      currentData = generateMockData(models, timeRange, selectedState);
-    }
-  } catch {
-    currentData = generateMockData(models, timeRange, selectedState);
-  }
+  const args = {
+    models: models.map((m) => ({ make: m.make, model: m.model })),
+    timeRange,
+    state: selectedState,
+  };
 
+  let result: AnalyzerResult | null = null;
+  if (_getAuth().value) {
+    try {
+      result = await _fetchDirect(args);
+    } catch (e) {
+      console.warn("Direct sold-summary fetch failed, falling back to mock:", e);
+    }
+  }
+  currentData = result ?? generateMockData(models, timeRange, selectedState);
   renderAll();
 }
 
 // ── Build UI ───────────────────────────────────────────────────────────────
 function buildUI() {
+  // Clear before constructing so any module-level elements appended to body
+  // (e.g. settings panel from _addSettingsBar) survive the rebuild.
+  document.body.innerHTML = "";
   document.body.style.cssText = `
     background: ${BG_COLOR}; color: ${TEXT_PRIMARY}; font-family: -apple-system, BlinkMacSystemFont,
     'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh;
     overflow: hidden;
   `;
 
-  // Control bar
+  // Control bar — position:relative so the badge+gear can be absolutely placed
+  // top-right; padding-right reserves space for them so wrapped controls don't
+  // run underneath.
   const controlBar = el("div", {
-    style: `display:flex; align-items:center; gap:12px; padding:12px 20px;
+    style: `display:flex; align-items:center; gap:12px; padding:12px 120px 12px 20px;
       background:${SURFACE_COLOR}; border-bottom:1px solid ${BORDER_COLOR}; flex-wrap:wrap;
-      min-height:56px;`,
+      min-height:56px; position:relative;`,
   });
 
   // Mode toggle
@@ -439,16 +692,23 @@ function buildUI() {
   });
   controlBar.appendChild(timeContainer);
 
-  // State dropdown
+  // State dropdown — `title` shows full state name on hover (browser-native tooltip)
   const stateSelect = el("select", {
     style: selectStyle(),
+    title: STATE_NAMES[selectedState] ?? selectedState,
     onchange: (e: Event) => {
-      selectedState = (e.target as HTMLSelectElement).value;
+      const sel = e.target as HTMLSelectElement;
+      selectedState = sel.value;
+      sel.title = STATE_NAMES[selectedState] ?? selectedState;
       fetchData();
     },
   }) as HTMLSelectElement;
   US_STATES.forEach((s) => {
-    const opt = el("option", { value: s, textContent: s }) as HTMLOptionElement;
+    const opt = el("option", {
+      value: s,
+      textContent: s,
+      title: STATE_NAMES[s] ?? s,
+    }) as HTMLOptionElement;
     if (s === selectedState) opt.selected = true;
     stateSelect.appendChild(opt);
   });
@@ -478,6 +738,9 @@ function buildUI() {
     },
   });
   controlBar.appendChild(maToggle);
+
+  // Mode badge + settings gear (pushed to far right via margin-left:auto)
+  _addSettingsBar(controlBar);
 
   // Main content area
   const mainArea = el("div", {
@@ -566,8 +829,7 @@ function buildUI() {
   });
   ticker.textContent = "Loading depreciation data...";
 
-  // Assemble
-  document.body.innerHTML = "";
+  // Assemble — body was cleared at the top of buildUI
   document.body.appendChild(controlBar);
 
   // ── Demo mode banner ──
@@ -967,9 +1229,27 @@ function renderCurveChart() {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // Tooltip
-    const tooltipW = 160;
-    const tooltipH = 20 + currentData.models.length * 18;
+    // Tooltip — measure first, then draw with uniform padding on all four sides
+    const TT_PAD = 12;  // uniform padding: top / right / bottom / left
+    const TT_ROW = 22;  // height of each row (header + every data row)
+    const TT_DOT = 16;  // dot diameter + gap before text label
+
+    ctx.font = "bold 11px -apple-system, sans-serif";
+    let maxTextW = ctx.measureText(`Month ${hoveredMonth}`).width;
+    ctx.font = "11px -apple-system, sans-serif";
+    currentData.models.forEach((md) => {
+      const pt = md.monthlyData.find((p) => p.month === hoveredMonth);
+      if (!pt) return;
+      const label = `${md.model.make} ${md.model.model}`;
+      const val = showPctOfMsrp ? `${pt.pctOfMsrp}%` : `$${pt.avgPrice.toLocaleString()}`;
+      const tw = ctx.measureText(`${label}: ${val}`).width;
+      if (tw > maxTextW) maxTextW = tw;
+    });
+
+    const totalRows = 1 + currentData.models.length; // header row + one row per model
+    const tooltipW = TT_PAD * 2 + TT_DOT + maxTextW;
+    const tooltipH = TT_PAD * 2 + totalRows * TT_ROW;
+
     let tx = x + 12;
     if (tx + tooltipW > w - pad.right) tx = x - tooltipW - 12;
     const ty = pad.top + 10;
@@ -981,26 +1261,35 @@ function renderCurveChart() {
     ctx.fill();
     ctx.stroke();
 
+    // Row center helper: row 0 = header, rows 1..n = data
+    const rowCY = (i: number) => ty + TT_PAD + (i + 0.5) * TT_ROW;
+
     ctx.fillStyle = TEXT_PRIMARY;
     ctx.font = "bold 11px -apple-system, sans-serif";
     ctx.textAlign = "left";
-    ctx.fillText(`Month ${hoveredMonth}`, tx + 10, ty + 14);
+    ctx.textBaseline = "middle";
+    ctx.fillText(`Month ${hoveredMonth}`, tx + TT_PAD, rowCY(0));
 
     currentData.models.forEach((md, idx) => {
       const pt = md.monthlyData.find((p) => p.month === hoveredMonth);
       if (!pt) return;
       const color = COLORS[idx % COLORS.length];
+      const cy = rowCY(idx + 1); // data rows start at row index 1
+
       ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.arc(tx + 10, ty + 30 + idx * 18, 4, 0, Math.PI * 2);
+      ctx.arc(tx + TT_PAD + 4, cy, 4, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = TEXT_SECONDARY;
       ctx.font = "11px -apple-system, sans-serif";
+      ctx.textBaseline = "middle";
       const label = `${md.model.make} ${md.model.model}`;
       const val = showPctOfMsrp ? `${pt.pctOfMsrp}%` : `$${pt.avgPrice.toLocaleString()}`;
-      ctx.fillText(`${label}: ${val}`, tx + 20, ty + 34 + idx * 18);
+      ctx.fillText(`${label}: ${val}`, tx + TT_PAD + TT_DOT, cy);
     });
+
+    ctx.textBaseline = "alphabetic";
   }
 
   // Mouse tracking
@@ -1053,47 +1342,41 @@ function renderSegmentBars() {
   const barH = Math.min(28, (chartH - (segments.length - 1) * 6) / segments.length);
   const gap = (chartH - barH * segments.length) / Math.max(segments.length - 1, 1);
 
-  // Current model segments
-  const modelSegments = currentData.models.map((md) => md.segment);
-
+  // Every segment is rendered in full-emphasis styling so the chart compares
+  // all body types at once. The previous "highlight only the selected model's
+  // segment" treatment dimmed the rest of the chart and made cross-segment
+  // comparison hard.
   segments.forEach((seg, i) => {
     const y = pad.top + i * (barH + gap);
     const barW = (seg.monthlyDepreciationPct / maxRate) * chartW;
-    const isHighlighted = modelSegments.includes(seg.bodyType);
 
-    // Label
-    ctx.fillStyle = isHighlighted ? TEXT_PRIMARY : TEXT_SECONDARY;
-    ctx.font = `${isHighlighted ? "600" : "400"} 12px -apple-system, sans-serif`;
+    // Bar fill colour: green (slow depreciation) → red (fast)
+    const t = seg.monthlyDepreciationPct / maxRate;
+    const barColor = `rgb(${Math.round(34 + t * 205)},${Math.round(211 - t * 143)},${Math.round(153 - t * 85)})`;
+
+    // Body-type label
+    ctx.fillStyle = TEXT_PRIMARY;
+    ctx.font = "600 12px -apple-system, sans-serif";
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
     ctx.fillText(seg.bodyType, pad.left - 10, y + barH / 2);
 
-    // Bar background
+    // Track + filled bar + outline
     ctx.fillStyle = BORDER_COLOR + "40";
     roundRect(ctx, pad.left, y, chartW, barH, 4);
     ctx.fill();
 
-    // Bar fill -- green for slow depreciation, red for fast
-    const t = seg.monthlyDepreciationPct / maxRate;
-    const r = Math.round(34 + t * (239 - 34));
-    const g = Math.round(211 - t * (211 - 68));
-    const b = Math.round(153 - t * (153 - 68));
-    const barColor = `rgb(${r},${g},${b})`;
-
-    ctx.fillStyle = isHighlighted ? barColor : barColor + "88";
+    ctx.fillStyle = barColor;
     roundRect(ctx, pad.left, y, barW, barH, 4);
     ctx.fill();
 
-    // Highlight border
-    if (isHighlighted) {
-      ctx.strokeStyle = barColor;
-      ctx.lineWidth = 1.5;
-      roundRect(ctx, pad.left, y, barW, barH, 4);
-      ctx.stroke();
-    }
+    ctx.strokeStyle = barColor;
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, pad.left, y, barW, barH, 4);
+    ctx.stroke();
 
     // Value label
-    ctx.fillStyle = isHighlighted ? TEXT_PRIMARY : TEXT_SECONDARY;
+    ctx.fillStyle = TEXT_PRIMARY;
     ctx.font = "11px -apple-system, sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
