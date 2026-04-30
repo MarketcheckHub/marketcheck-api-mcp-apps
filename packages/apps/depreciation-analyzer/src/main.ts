@@ -76,31 +76,35 @@ async function _fetchDirect(args: {
   const months = args.timeRange === "3M" ? 3 : args.timeRange === "6M" ? 6 : args.timeRange === "1Y" ? 12 : 24;
   const stateParam = args.state && args.state !== "National" ? { state: args.state } : {};
 
+  // Active listings per model — group by year to build depreciation curves
   const modelPromises = args.models.map((m) =>
-    _mcSold({
-      ranking_dimensions: "make,model,model_year",
-      ranking_measure: "sold_count",
-      inventory_type: "Used",
+    _mcActive({
       make: m.make,
       model: m.model,
-      top_n: 25,
+      rows: 200,
+      sort_by: "year",
+      sort_order: "desc",
       ...stateParam,
     }).catch(() => null)
   );
 
+  // Segment rates by body type (model_year not a valid dimension; falls back to defaults)
   const segmentPromise = _mcSold({
-    ranking_dimensions: "body_type,model_year",
+    ranking_dimensions: "body_type",
     ranking_measure: "sold_count",
+    ranking_order: "desc",
     inventory_type: "Used",
-    top_n: 60,
+    top_n: 20,
     ...stateParam,
   }).catch(() => null);
 
   const firstModel = args.models[0];
+  // Geo: summary_by=state is the correct param (state is not a valid ranking_dimension)
   const geoPromise = firstModel
     ? _mcSold({
-        ranking_dimensions: "state,make,model",
+        summary_by: "state",
         ranking_measure: "sold_count",
+        ranking_order: "desc",
         inventory_type: "Used",
         make: firstModel.make,
         model: firstModel.model,
@@ -114,29 +118,40 @@ async function _fetchDirect(args: {
     geoPromise,
   ]);
 
-  // Build per-model depreciation curves
+  // Build per-model depreciation curves from active listing prices grouped by year
   const segmentByMakeModel: Record<string, string> = {};
   const modelData: DepreciationData[] = args.models.map((m, idx) => {
     const resp = modelResults[idx];
-    const rows = (resp?.data ?? []).filter((r: any) => r.model_year && r.average_sale_price);
-    if (rows.length === 0) {
+    const listings: any[] = resp?.listings ?? [];
+
+    // Bucket prices by model year
+    const yearBuckets: Record<number, { total: number; count: number }> = {};
+    for (const l of listings) {
+      const yr = l.year ?? l.build?.year;
+      const price = l.price;
+      if (!yr || !price || price < 1000) continue;
+      if (!yearBuckets[yr]) yearBuckets[yr] = { total: 0, count: 0 };
+      yearBuckets[yr].total += price;
+      yearBuckets[yr].count++;
+    }
+    const years = Object.keys(yearBuckets).map(Number).sort((a, b) => b - a);
+    if (years.length === 0) {
       return { model: m, msrp: 0, monthlyData: [], segment: "SUV" };
     }
-    rows.sort((a: any, b: any) => (b.model_year ?? 0) - (a.model_year ?? 0));
-    const newestYear = rows[0].model_year;
-    const newestPrice = rows[0].average_sale_price;
-    // Use the newest avg sold price as anchor; treat as ~95% of MSRP for retention math
-    const msrp = Math.round(newestPrice / 0.95);
-    const segment = rows[0].body_type ?? "SUV";
-    segmentByMakeModel[`${m.make}|${m.model}`] = segment;
 
-    // year → avg price map
     const yearPrice: Record<number, number> = {};
     const yearVolume: Record<number, number> = {};
-    for (const r of rows) {
-      yearPrice[r.model_year] = r.average_sale_price;
-      yearVolume[r.model_year] = (yearVolume[r.model_year] ?? 0) + (r.sold_count ?? 0);
+    for (const yr of years) {
+      yearPrice[yr] = yearBuckets[yr].total / yearBuckets[yr].count;
+      yearVolume[yr] = yearBuckets[yr].count;
     }
+    const newestYear = years[0];
+    const newestPrice = yearPrice[newestYear];
+    // Use the newest avg active price as anchor; treat as ~95% of MSRP for retention math
+    const msrp = Math.round(newestPrice / 0.95);
+    const segment = listings[0]?.body_type ?? listings[0]?.build?.body_type ?? "SUV";
+    segmentByMakeModel[`${m.make}|${m.model}`] = segment;
+
     // Interpolate monthly points 1..months. Month i corresponds to year (newestYear - i/12).
     const monthlyData: MonthlyDataPoint[] = [];
     for (let i = 1; i <= months; i++) {
