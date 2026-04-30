@@ -553,14 +553,28 @@ const APPS = [
     tagline: "The pulse of the automotive market",
     segment: "Appraiser",
     toolName: null,
-    description: "Macro-level market trends dashboard using sold vehicle summaries. Shows price trends, volume shifts, and segment dynamics across the automotive market.",
+    description: "Macro-level market trends dashboard using sold vehicle summaries. Shows KPI cards, fastest/slowest movers with MoM comparison, price movers, segment mix donut, brand residual value bars, and a sortable state ranking table. Filters by period, geography, inventory type, body type, and fuel type.",
+    useCases: [
+      { persona: "Market Analysts", desc: "Track national or state-level volume, price, and DOM trends over 30d–1Y periods." },
+      { persona: "OEM / Brand Teams", desc: "Monitor brand residual value (sale price % of MSRP) against competitors." },
+      { persona: "Dealers", desc: "Spot price movers early — MoM shifts signal inventory or demand changes." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key" },
+      { name: "state", desc: "2-letter state code — scopes all data to that state" },
+      { name: "period", desc: "30d | 60d | 90d | 6M | 1Y" },
+      { name: "inventory", desc: "New | Used | Both" },
+      { name: "body", desc: "All | SUV | Sedan | Truck" },
+      { name: "fuel", desc: "All | ICE | EV | Hybrid" },
+    ],
     inputParams: [
       { name: "state", type: "string", required: false, desc: "State for regional trends" },
+      { name: "period", type: "string", required: false, desc: "Time window (30d, 60d, 90d, 6M, 1Y)" },
     ],
     apiFlow: [
-      { step: 1, label: "Market Data", apis: ["soldSummary"], parallel: false, note: "Fetch sold summary with make and body type dimensions" },
+      { step: 1, label: "Market Data (5 parallel)", apis: ["soldSummary"], parallel: true, note: "make+model current period, make+model prior period (MoM), body_type (segment mix), make (brand residuals), summary_by=state (state ranking)" },
     ],
-    renders: "Price trend charts, volume bars, segment market share pie, top movers, regional comparison",
+    renders: "KPI cards, fastest/slowest movers tables, price movers table, segment mix donut chart, brand residual value bar chart, sortable state ranking table",
   },
   {
     id: "group-operations-center",
