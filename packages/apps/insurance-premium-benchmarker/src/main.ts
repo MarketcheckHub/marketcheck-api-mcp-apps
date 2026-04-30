@@ -15,13 +15,14 @@ function _getAuth(): { mode: "api_key" | "oauth_token" | null; value: string | n
   if (key) return { mode: "api_key", value: key };
   return { mode: null, value: null };
 }
-function _detectAppMode(): "mcp" | "live" | "demo" { if (_getAuth().value) return "live"; if (_safeApp) return "mcp"; return "demo"; }
+function _detectAppMode(): "mcp" | "live" | "demo" { if (_getAuth().value) return "live"; if (_safeApp && window.parent !== window) return "mcp"; return "demo"; }
 function _isEmbedMode(): boolean { return new URLSearchParams(location.search).has("embed"); }
 function _getUrlParams(): Record<string, string> { const params = new URLSearchParams(location.search); const result: Record<string, string> = {}; for (const key of ["vin","zip","make","model","miles","state","dealer_id","ticker","price"]) { const v = params.get(key); if (v) result[key] = v; } return result; }
 function _proxyBase(): string { return location.protocol.startsWith("http") ? "" : "http://localhost:3001"; }
 
 // ── Direct MarketCheck API Client (browser → api.marketcheck.com) ──────
 const _MC = "https://api.marketcheck.com";
+let _lastApiStatus: number | null = null;
 async function _mcApi(path, params = {}) {
   const auth = _getAuth();
   if (!auth.value) return null;
@@ -34,6 +35,7 @@ async function _mcApi(path, params = {}) {
   const headers = {};
   if (auth.mode === "oauth_token") headers["Authorization"] = "Bearer " + auth.value;
   const res = await fetch(url.toString(), { headers });
+  _lastApiStatus = res.status;
   if (!res.ok) throw new Error("MC API " + res.status);
   return res.json();
 }
@@ -47,32 +49,26 @@ function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;dele
 function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
 function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
 
-async function _fetchDirect(args) {
-  const [byBodyType,byFuelType,byState] = await Promise.all([_mcSold({ranking_dimensions:"body_type",ranking_measure:"sold_count,average_sale_price",inventory_type:"Used"}),_mcSold({ranking_dimensions:"body_type,fuel_type_category",ranking_measure:"sold_count,average_sale_price",inventory_type:"Used"}),_mcSold({ranking_dimensions:"state",ranking_measure:"sold_count,average_sale_price",inventory_type:"Used",top_n:15})]);
-  return {byBodyType,byFuelType,byState};
+// One real call: summary_by=state returns ~1000 rows of (month, state, make, model, body_type, sold_count, avg/std/total price).
+// That single payload is enough to populate KPIs, state rankings, high-volatility models, and distribution buckets.
+// (The body-type × fuel-type matrix and EV-vs-ICE panel keep mock data — fuel_type isn't exposed by this endpoint.)
+async function _fetchDirect(_args: any) {
+  return _mcSold({ summary_by: "state" });
 }
-async function _callTool(toolName, args) {
+async function _callTool(_toolName: string, args: any) {
   const auth = _getAuth();
+  // 1. Direct API — when the user has provided an api_key, hit api.marketcheck.com directly.
   if (auth.value) {
-    // 1. Proxy (same-origin, reliable)
-    try {
-      const r = await fetch((_proxyBase()) + "/api/proxy/" + toolName, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...args, _auth_mode: auth.mode, _auth_value: auth.value }),
-      });
-      if (r.ok) { const d = await r.json(); return { content: [{ type: "text", text: JSON.stringify(d) }] }; }
-    } catch {}
-    // 2. Direct API fallback
     try {
       const data = await _fetchDirect(args);
       if (data) return { content: [{ type: "text", text: JSON.stringify(data) }] };
     } catch {}
   }
-  // 3. MCP mode (Claude, VS Code, etc.)
-  if (_safeApp) {
-    try { return await _safeApp.callServerTool({ name: toolName, arguments: args }); } catch {}
+  // 2. MCP mode — only when actually iframed into an MCP host with no auth.
+  if (_safeApp && window.parent !== window) {
+    try { return await _safeApp.callServerTool({ name: _toolName, arguments: args }); } catch {}
   }
-  // 4. Demo mode
+  // 3. Demo mode (caller falls back to mock when this returns null).
   return null;
 }
 
@@ -226,6 +222,139 @@ function getMockData(): BenchmarkResult {
   };
 }
 
+// ── Real-data mapper ───────────────────────────────────────────────────────────
+// Takes raw `/api/v1/sold-vehicles/summary?summary_by=state` rows and produces
+// a fully-populated BenchmarkResult by aggregating (state, make, model, body_type)
+// across months, weighted by sold_count. The fuel-type axis is not in the
+// response, so segmentMatrix and evIceComparison fall back to mock for those
+// dimensions while everything else (KPIs, state rankings, high-volatility
+// models, distribution buckets) is real.
+function _mapBenchmark(raw: any): BenchmarkResult | null {
+  const rows: any[] = Array.isArray(raw?.data) ? raw.data : [];
+  if (!rows.length) return null;
+  const num = (v: any) => { const n = typeof v === "number" ? v : parseFloat(v); return Number.isFinite(n) ? n : 0; };
+  const mock = getMockData();
+
+  // Headline aggregates
+  let totalSold = 0, weightedPrice = 0, weightedStd = 0;
+  for (const r of rows) {
+    const sold = num(r.sold_count);
+    totalSold += sold;
+    weightedPrice += num(r.average_sale_price) * sold;
+    weightedStd += num(r.sale_price_std_dev) * sold;
+  }
+  const avgReplacementCost = totalSold > 0 ? Math.round(weightedPrice / totalSold) : 0;
+  const avgStd = totalSold > 0 ? weightedStd / totalSold : 0;
+  const priceVolatility = avgReplacementCost > 0 ? avgStd / avgReplacementCost : 0;
+
+  // Highest-risk segment by body type (highest weighted volatility)
+  const bodyAgg = new Map<string, { sold: number; priceSum: number; stdSum: number }>();
+  for (const r of rows) {
+    const bt = String(r.body_type ?? "").trim();
+    if (!bt) continue;
+    const cur = bodyAgg.get(bt) ?? { sold: 0, priceSum: 0, stdSum: 0 };
+    const sold = num(r.sold_count);
+    cur.sold += sold;
+    cur.priceSum += num(r.average_sale_price) * sold;
+    cur.stdSum += num(r.sale_price_std_dev) * sold;
+    bodyAgg.set(bt, cur);
+  }
+  let highestRiskSegment = "—";
+  let highestVol = 0;
+  for (const [bt, v] of bodyAgg.entries()) {
+    if (v.sold === 0) continue;
+    const avg = v.priceSum / v.sold;
+    const vol = avg > 0 ? (v.stdSum / v.sold) / avg : 0;
+    if (vol > highestVol) { highestVol = vol; highestRiskSegment = bt; }
+  }
+
+  // State rankings — top 15 by avg sale price
+  const stateAgg = new Map<string, { sold: number; priceSum: number }>();
+  for (const r of rows) {
+    const st = String(r.state ?? "").trim();
+    if (!st) continue;
+    const cur = stateAgg.get(st) ?? { sold: 0, priceSum: 0 };
+    const sold = num(r.sold_count);
+    cur.sold += sold;
+    cur.priceSum += num(r.average_sale_price) * sold;
+    stateAgg.set(st, cur);
+  }
+  const stateRankings: StateRanking[] = Array.from(stateAgg.entries())
+    .filter(([, v]) => v.sold > 0)
+    .map(([st, v]) => ({ state: st, avgPrice: Math.round(v.priceSum / v.sold), volume: v.sold }))
+    .sort((a, b) => b.avgPrice - a.avgPrice)
+    .slice(0, 15);
+
+  // High-volatility models — group by (make, model), sort by volatility desc
+  const modelAgg = new Map<string, { make: string; model: string; bodyType: string; sold: number; priceSum: number; stdSum: number }>();
+  for (const r of rows) {
+    const make = String(r.make ?? "").trim();
+    const model = String(r.model ?? "").trim();
+    if (!make || !model) continue;
+    const k = `${make}|${model}`;
+    const cur = modelAgg.get(k) ?? { make, model, bodyType: String(r.body_type ?? ""), sold: 0, priceSum: 0, stdSum: 0 };
+    const sold = num(r.sold_count);
+    cur.sold += sold;
+    cur.priceSum += num(r.average_sale_price) * sold;
+    cur.stdSum += num(r.sale_price_std_dev) * sold;
+    modelAgg.set(k, cur);
+  }
+  const highVolatilityModels: HighVolatilityModel[] = Array.from(modelAgg.values())
+    .filter(m => m.sold >= 5)
+    .map(m => {
+      const avg = m.priceSum / m.sold;
+      return {
+        make: m.make,
+        model: m.model,
+        avgPrice: Math.round(avg),
+        volatility: avg > 0 ? +(m.stdSum / m.sold / avg).toFixed(3) : 0,
+        sampleSize: m.sold,
+        bodyType: m.bodyType,
+      };
+    })
+    .sort((a, b) => b.volatility - a.volatility)
+    .slice(0, 15);
+
+  // Distribution buckets — weight each row's avg_sale_price by sold_count
+  const buckets = [
+    { label: "$10K-$15K", count: 0 }, { label: "$15K-$20K", count: 0 },
+    { label: "$20K-$25K", count: 0 }, { label: "$25K-$30K", count: 0 },
+    { label: "$30K-$35K", count: 0 }, { label: "$35K-$40K", count: 0 },
+    { label: "$40K-$45K", count: 0 }, { label: "$45K-$50K", count: 0 },
+    { label: "$50K-$60K", count: 0 }, { label: "$60K+", count: 0 },
+  ];
+  for (const r of rows) {
+    const price = num(r.average_sale_price);
+    const sold = num(r.sold_count);
+    let i: number;
+    if (price < 15000) i = 0;
+    else if (price < 20000) i = 1;
+    else if (price < 25000) i = 2;
+    else if (price < 30000) i = 3;
+    else if (price < 35000) i = 4;
+    else if (price < 40000) i = 5;
+    else if (price < 45000) i = 6;
+    else if (price < 50000) i = 7;
+    else if (price < 60000) i = 8;
+    else i = 9;
+    buckets[i].count += sold;
+  }
+
+  return {
+    avgReplacementCost,
+    priceVolatility: +priceVolatility.toFixed(3),
+    totalSampleSize: totalSold,
+    highestRiskSegment,
+    // segmentMatrix and evIceComparison need fuel_type (not in this endpoint) —
+    // keep illustrative mock data so those panels still render meaningfully.
+    segmentMatrix: mock.segmentMatrix,
+    evIceComparison: mock.evIceComparison,
+    distributionBuckets: buckets.some(b => b.count > 0) ? buckets : mock.distributionBuckets,
+    stateRankings: stateRankings.length ? stateRankings : mock.stateRankings,
+    highVolatilityModels: highVolatilityModels.length ? highVolatilityModels : mock.highVolatilityModels,
+  };
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function fmtCurrency(v: number): string {
@@ -365,8 +494,7 @@ function drawHistogram(canvas: HTMLCanvasElement, buckets: { label: string; coun
 // ── Main App ───────────────────────────────────────────────────────────────────
 
 async function main() {
-  let serverAvailable = !!_safeApp;
-  try { (_safeApp as any)?.connect?.(); } catch { serverAvailable = false; }
+  try { (_safeApp as any)?.connect?.(); } catch {}
 
   document.body.style.cssText = "margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;color:#e2e8f0;overflow-x:hidden;";
 
@@ -484,9 +612,15 @@ async function main() {
     </div>`;
 
     let data: BenchmarkResult;
+    let apiNotice: string | null = null;
+    const mode = _detectAppMode();
+    _lastApiStatus = null;
 
     try {
-      if (serverAvailable) {
+      if (mode === "demo") {
+        await new Promise(r => setTimeout(r, 400));
+        data = getMockData();
+      } else {
         const args: Record<string, any> = {};
         if (bodyTypeSelect.value) args.body_type = bodyTypeSelect.value;
         if (fuelTypeSelect.value) args.fuel_type = fuelTypeSelect.value;
@@ -496,18 +630,37 @@ async function main() {
 
         const response = await _callTool("benchmark-insurance-premiums", args);
         const textContent = response?.content?.find((c: any) => c.type === "text");
-        data = JSON.parse(textContent?.text ?? "{}");
-      } else {
-        await new Promise(r => setTimeout(r, 700));
-        data = getMockData();
+        const raw: any = textContent?.text ? JSON.parse(textContent.text) : null;
+        // raw is the API payload `{ success, data: [...] }` — map it into BenchmarkResult.
+        const mapped = _mapBenchmark(raw);
+        if (mapped) {
+          data = mapped;
+        } else {
+          data = getMockData();
+          if (_lastApiStatus === 403) {
+            apiNotice = "Your API key does not have access to the Sold Summary endpoint (Enterprise tier). Showing illustrative demo data instead. Contact MarketCheck to upgrade.";
+          } else if (_lastApiStatus === 401) {
+            apiNotice = "Invalid or expired API key. Showing illustrative demo data instead.";
+          } else if (_lastApiStatus === 422) {
+            apiNotice = "MarketCheck API rejected the query (422 Unprocessable Entity). Showing illustrative demo data instead.";
+          } else if (_lastApiStatus && _lastApiStatus >= 400) {
+            apiNotice = `MarketCheck API returned ${_lastApiStatus}. Showing illustrative demo data instead.`;
+          } else if (mode === "live") {
+            apiNotice = "Live API call did not return benchmark data. Showing illustrative demo data instead.";
+          }
+        }
       }
 
-      renderResults(data);
+      renderResults(data, apiNotice);
     } catch (err: any) {
       console.error("Analysis failed, falling back to mock:", err);
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 200));
       data = getMockData();
-      renderResults(data);
+      const status = _lastApiStatus;
+      if (status === 403) apiNotice = "Your API key does not have access to the Sold Summary endpoint (Enterprise tier). Showing illustrative demo data instead.";
+      else if (status === 401) apiNotice = "Invalid or expired API key. Showing illustrative demo data instead.";
+      else if (status && status >= 400) apiNotice = `MarketCheck API returned ${status}. Showing illustrative demo data instead.`;
+      renderResults(data, apiNotice);
     }
 
     analyzeBtn.disabled = false;
@@ -517,8 +670,20 @@ async function main() {
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
-  function renderResults(data: BenchmarkResult) {
+  function renderResults(data: BenchmarkResult, apiNotice: string | null = null) {
     results.innerHTML = "";
+
+    // ── API Notice (Enterprise / 401 / 403) ──
+    if (apiNotice) {
+      const notice = document.createElement("div");
+      notice.style.cssText = "background:linear-gradient(135deg,#7f1d1d22,#ef444411);border:1px solid #ef444466;border-radius:10px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:flex-start;gap:12px;";
+      notice.innerHTML = `<div style="font-size:18px;line-height:1;color:#fca5a5;">&#9888;</div>
+        <div style="flex:1;">
+          <div style="font-size:13px;font-weight:700;color:#fca5a5;margin-bottom:4px;">Live data unavailable</div>
+          <div style="font-size:12px;color:#fecaca;line-height:1.5;">${apiNotice}</div>
+        </div>`;
+      results.appendChild(notice);
+    }
 
     // ── KPI Ribbon ──
     const kpiRibbon = document.createElement("div");

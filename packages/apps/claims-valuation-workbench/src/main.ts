@@ -70,25 +70,132 @@ function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;dele
 function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
 function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
 
+// Read make/model/year/trim from a listing — recents/active put them under `build`,
+// older docs sometimes show them top-level. Try both.
+function _listingBuild(l: any) {
+  const b = l?.build ?? {};
+  return {
+    year: b.year ?? l?.year ?? 0,
+    make: b.make ?? l?.make ?? "",
+    model: b.model ?? l?.model ?? "",
+    trim: b.trim ?? l?.trim ?? "",
+  };
+}
+
 async function _fetchDirect(args) {
+  // Decode is required — fail fast if it doesn't return.
   const decode = await _mcDecode(args.vin);
-  const [fmvResult,soldComps,regionalData,replacements] = await Promise.all([_mcPredict({...args,dealer_type:"franchise"}),_mcRecent({make:decode?.make,model:decode?.model,zip:args.zip,radius:100,rows:10,stats:"price"}),_mcSold({make:decode?.make,model:decode?.model,summary_by:"state"}),_mcActive({make:decode?.make,model:decode?.model,zip:args.zip,radius:50,rows:5,sort_by:"price",sort_order:"asc"})]);
-  return {decode,fmvResult,soldComps,regionalData,replacements};
+  // Each downstream call degrades independently. Sold Summary (Enterprise) is the
+  // most likely to 403; we don't want it to take down FMV / comps / replacements.
+  const [fmvResult, soldComps, regionalData, replacements] = await Promise.all([
+    _mcPredict({ ...args, dealer_type: "franchise" }).catch(() => null),
+    _mcRecent({ make: decode?.make, model: decode?.model, zip: args.zip, radius: 100, rows: 10, stats: "price" }).catch(() => null),
+    _mcSold({ make: decode?.make, model: decode?.model, summary_by: "state" }).catch(() => null),
+    _mcActive({ make: decode?.make, model: decode?.model, zip: args.zip, radius: 50, rows: 5, sort_by: "price", sort_order: "asc" }).catch(() => null),
+  ]);
+
+  // ── FMV: predict's `marketcheck_price` is authoritative; fall back to comp stats ──
+  const predictPrice = fmvResult?.marketcheck_price
+    ?? fmvResult?.predicted_price
+    ?? fmvResult?.price
+    ?? fmvResult?.median_price
+    ?? fmvResult?.comparables?.stats?.price?.mean
+    ?? 0;
+  const recentMean = soldComps?.stats?.price?.mean ?? soldComps?.stats?.price?.median ?? 0;
+  const fmv = Math.round(predictPrice > 0 ? predictPrice : (recentMean > 0 ? recentMean : 0));
+
+  // Low/high settlement range — should bracket FMV.
+  // Use predict's LOCAL-COMPS percentiles (same VIN year/trim/area) when available.
+  // Fall back to ±10% of FMV — NEVER use the national recents percentiles here:
+  // those describe the broad market and can sit far from a per-VIN predicted price.
+  const predictPct = fmvResult?.comparables?.stats?.price?.percentiles ?? {};
+  const localLow  = predictPct["25.0"] ?? predictPct["25th"];
+  const localHigh = predictPct["75.0"] ?? predictPct["75th"];
+  let low  = Math.round(fmvResult?.price_range?.low  ?? localLow  ?? fmv * 0.90);
+  let high = Math.round(fmvResult?.price_range?.high ?? localHigh ?? fmv * 1.10);
+  // Defensive clamp — if percentiles came from a wider distribution that doesn't
+  // contain FMV, fall back to ±10% so the range stays meaningful.
+  if (fmv > 0 && (low > fmv || high < fmv)) {
+    low  = Math.round(fmv * 0.90);
+    high = Math.round(fmv * 1.10);
+  }
+
+  // ── Sold comps (recents endpoint) — listings have NO top-level price in standard tier;
+  // use last_seen_price if present, otherwise fall back to the response-level mean. ──
+  const rawListings: any[] = soldComps?.listings ?? [];
+  const fallbackPrice = Math.round(recentMean || fmv);
+  const mappedSoldComps = rawListings.slice(0, 10).map((l: any) => {
+    const b = _listingBuild(l);
+    return {
+      vin: l.vin ?? "",
+      year: b.year || decode?.year || 0,
+      make: b.make || decode?.make || "",
+      model: b.model || decode?.model || "",
+      trim: b.trim || "",
+      salePrice: l.price ?? l.sale_price ?? l.last_seen_price ?? fallbackPrice,
+      miles: l.miles ?? l.mileage ?? 0,
+      dateSold: (l.last_seen_at_date ?? l.sold_at ?? "").slice(0, 10),
+      state: l.dealer?.state ?? l.seller_info?.state ?? l.state ?? "",
+    };
+  });
+
+  // ── Replacement options (active endpoint) — listings DO have top-level price ──
+  const rawActive: any[] = replacements?.listings ?? [];
+  const mappedReplacements = rawActive.slice(0, 5).map((l: any) => {
+    const b = _listingBuild(l);
+    return {
+      year: b.year || decode?.year || 0,
+      make: b.make || decode?.make || "",
+      model: b.model || decode?.model || "",
+      trim: b.trim || "",
+      price: l.price ?? 0,
+      miles: l.miles ?? l.mileage ?? 0,
+      dealer: l.dealer?.name ?? l.seller_info?.name ?? "",
+      city: l.dealer?.city ?? l.seller_info?.city ?? "",
+      state: l.dealer?.state ?? l.seller_info?.state ?? "",
+      distanceMi: Math.round(l.dist ?? l.distance ?? 0),
+    };
+  });
+
+  // ── Regional variance — Enterprise endpoint; degrades to empty when 403 ──
+  const rawRegional: any[] = regionalData?.results ?? regionalData?.data ?? [];
+  const mappedRegional = rawRegional.slice(0, 10).map((r: any) => ({
+    state: r.state ?? r.dimension_value ?? "",
+    avgPrice: r.average_price ?? r.avg_price ?? r.average_sale_price ?? 0,
+    count: r.count ?? r.sold_count ?? 0,
+  }));
+
+  const nationalAvg = recentMean > 0 ? Math.round(recentMean) : fmv;
+
+  return {
+    vin: args.vin,
+    year: decode?.year ?? 0,
+    make: decode?.make ?? "",
+    model: decode?.model ?? "",
+    trim: decode?.trim ?? "",
+    fmv,
+    low,
+    high,
+    soldComps: mappedSoldComps,
+    replacements: mappedReplacements,
+    regionalPrices: mappedRegional,
+    nationalAvg,
+  } as any;
 }
 
 async function _callTool(toolName, args) {
-  // 1. MCP mode (Claude, VS Code, etc.)
-  if (_safeApp) {
-    try { const r = _safeApp.callServerTool({ name: toolName, arguments: args }); return r; } catch {}
-  }
-  // 2. Direct API mode (browser → api.marketcheck.com)
   const auth = _getAuth();
+  // When the user has provided an API key (LIVE mode), prefer the real API.
+  // Trying the MCP path first hangs in a standalone browser because
+  // _safeApp.callServerTool returns a Promise that never resolves usefully
+  // outside an MCP iframe host — so live-mode users would silently get mock data.
   if (auth.value) {
+    // 1. Direct API
     try {
       const data = await _fetchDirect(args);
       if (data) return { content: [{ type: "text", text: JSON.stringify(data) }] };
     } catch (e) { console.warn("Direct API failed, trying proxy:", e); }
-    // 3. Proxy fallback
+    // 2. Proxy fallback
     try {
       const r = await fetch((_proxyBase()) + "/api/proxy/" + toolName, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -96,6 +203,10 @@ async function _callTool(toolName, args) {
       });
       if (r.ok) { const d = await r.json(); return { content: [{ type: "text", text: JSON.stringify(d) }] }; }
     } catch {}
+  }
+  // 3. MCP mode (only when iframed into an MCP host with no auth)
+  if (_safeApp && window.parent !== window) {
+    try { const r = await _safeApp.callServerTool({ name: toolName, arguments: args }); return r; } catch {}
   }
   // 4. Demo mode (null → app uses mock data)
   return null;
@@ -800,10 +911,15 @@ function renderApp(): void {
   wb.className = "workbench";
 
   // Header
-  wb.innerHTML = `
-    <h1><span class="icon">&#x2696;</span> Claims Valuation Workbench</h1>
-    <div class="subtitle">Insurance total-loss determination with defensible market evidence</div>
-  `;
+  const header = document.createElement("div");
+  header.style.cssText = "display:flex;align-items:center;gap:10px;margin-bottom:4px;";
+  header.innerHTML = `<h1 style="margin:0;flex:1;"><span class="icon">&#x2696;</span> Claims Valuation Workbench</h1>`;
+  wb.appendChild(header);
+  const subtitle = document.createElement("div");
+  subtitle.className = "subtitle";
+  subtitle.textContent = "Insurance total-loss determination with defensible market evidence";
+  wb.appendChild(subtitle);
+  _addSettingsBar(header);
 
   // Input Section
   wb.appendChild(buildInputSection());
@@ -927,6 +1043,19 @@ function renderResults(container: HTMLElement): void {
   const salvage = getSalvageValue(adjFmv);
   const stats = compStats(r.soldComps);
 
+  // Decoded vehicle summary — confirms what the VIN resolved to
+  const vehicleLine = [r.year, r.make, r.model, r.trim].filter(Boolean).join(" ").trim();
+  if (vehicleLine) {
+    const vehicleBar = document.createElement("div");
+    vehicleBar.style.cssText = "background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;";
+    vehicleBar.innerHTML = `
+      <div style="font-size:11px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Vehicle</div>
+      <div style="font-size:14px;font-weight:600;color:var(--text);">${vehicleLine}</div>
+      ${r.vin ? `<div style="font-size:11px;color:var(--text-dim);font-family:var(--mono);">VIN ending ${r.vin.slice(-6)}</div>` : ""}
+    `;
+    container.appendChild(vehicleBar);
+  }
+
   // Determination Banner
   container.appendChild(buildBanner(verdict, adjFmv, threshold, repairEstimate));
 
@@ -1024,7 +1153,8 @@ function buildSettlementPanel(fmv: number, low: number, high: number, salvage: {
   const range = high - low;
   const fillLeft = 0;
   const fillWidth = 100;
-  const markerPos = range > 0 ? ((fmv - low) / range) * 100 : 50;
+  const rawPos = range > 0 ? ((fmv - low) / range) * 100 : 50;
+  const markerPos = Math.max(0, Math.min(100, rawPos));
   barContainer.innerHTML = `
     <div class="range-bar-fill" style="left:${fillLeft}%;width:${fillWidth}%"></div>
     <div class="range-bar-marker" style="left:${markerPos}%"></div>
@@ -1099,6 +1229,21 @@ function buildRegionalPanel(prices: RegionalPrice[], nationalAvg: number): HTMLE
   panel.className = "panel";
   panel.innerHTML = `<div class="panel-title"><span class="pt-icon">&#x1F30E;</span> Regional Variance</div>`;
 
+  // Empty state — Sold Summary endpoint is Enterprise-tier; standard keys 403.
+  // Show a friendly notice instead of an empty table.
+  if (!prices || prices.length === 0) {
+    const notice = document.createElement("div");
+    notice.style.cssText = "padding:24px 16px;text-align:center;color:var(--text-dim);font-size:13px;line-height:1.6;";
+    notice.innerHTML = `
+      <div style="font-size:24px;margin-bottom:8px;opacity:0.5;">&#x1F30E;</div>
+      <div style="font-weight:600;color:var(--text);margin-bottom:4px;">Regional pricing unavailable</div>
+      <div style="font-size:12px;">State-level pricing requires the MarketCheck <strong>Sold Summary</strong> endpoint (Enterprise tier).</div>
+      <div style="font-size:11px;margin-top:8px;"><a href="https://developers.marketcheck.com" target="_blank" style="color:var(--accent);text-decoration:none;">Contact MarketCheck to upgrade &rarr;</a></div>
+    `;
+    panel.appendChild(notice);
+    return panel;
+  }
+
   let tableHtml = `<table><thead><tr>
     <th>State</th><th>Avg Price</th><th>vs National</th><th>Sample</th>
   </tr></thead><tbody>`;
@@ -1170,7 +1315,14 @@ async function evaluateClaim(): Promise<void> {
     let result: ValuationResult;
     try {
       const response = await _callTool("claims-valuation", args);
-      result = typeof response === "string" ? JSON.parse(response) : response;
+      // _callTool wraps data as { content: [{ type:"text", text: "..." }] }
+      // extract and parse that text payload
+      const textContent = response?.content?.find((c: any) => c.type === "text");
+      const raw = textContent?.text ? JSON.parse(textContent.text) : response;
+      // Real data must have a positive FMV from the prediction endpoint.
+      // If FMV is 0 (predict call failed) or shape is wrong, fall back to mock.
+      const isReal = raw && typeof raw.fmv === "number" && raw.fmv > 0;
+      result = isReal ? raw as ValuationResult : getMockData(state.vin);
     } catch {
       // Fallback to mock data
       result = getMockData(state.vin);
@@ -1193,7 +1345,22 @@ function recalcAndRender(): void {
 
 // ── Initialize ─────────────────────────────────────────────────────────────────
 
-// Initialize — works both in MCP host and standalone
+// Apply URL params to state before rendering
+(function applyUrlParams() {
+  const p = _getUrlParams();
+  if (p.vin) state.vin = p.vin;
+  if (p.zip) state.zip = p.zip;
+  if (p.miles) state.mileage = p.miles;
+})();
+
+// Render the shell UI
 renderApp();
-state.result = getMockData(state.vin);
-recalcAndRender();
+
+// Auto-trigger analysis if API key + VIN are in URL/localStorage
+if (_getAuth().value && state.vin) {
+  evaluateClaim();
+} else {
+  // Demo mode — show mock data immediately
+  state.result = getMockData(state.vin);
+  recalcAndRender();
+}
