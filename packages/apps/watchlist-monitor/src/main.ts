@@ -67,13 +67,9 @@ function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
 function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
 
 async function _callTool(toolName: string, args: Record<string, any>): Promise<any> {
-  // 1. MCP mode (Claude, VS Code, etc.)
-  if (_detectAppMode() === "mcp" && _safeApp) {
-    try { const r = await _safeApp.callServerTool({ name: toolName, arguments: args }); return r; } catch {}
-  }
-  // 2. Proxy fallback (for local dev with a running proxy)
   const auth = _getAuth();
   if (auth.value) {
+    // 1. Proxy (same-origin, reliable when a composite endpoint exists)
     try {
       const r = await fetch((_proxyBase()) + "/api/proxy/" + toolName, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -81,7 +77,17 @@ async function _callTool(toolName: string, args: Record<string, any>): Promise<a
       });
       if (r.ok) { const d = await r.json(); return { content: [{ type: "text", text: JSON.stringify(d) }] }; }
     } catch {}
+    // 2. Direct API fallback — orchestrate the 30+ parallel recents/active calls in-browser
+    try {
+      const d = await _fetchLive(args.state);
+      if (d) return { content: [{ type: "text", text: JSON.stringify(d) }] };
+    } catch {}
   }
+  // 3. MCP mode (Claude, VS Code, etc.)
+  if (_safeApp) {
+    try { return await _safeApp.callServerTool({ name: toolName, arguments: args }); } catch {}
+  }
+  // 4. Demo mode
   return null;
 }
 
@@ -722,28 +728,30 @@ async function main() {
     Loading watchlist signal data...
   </div>`;
 
-  const mode = _detectAppMode();
   const urlParams = _getUrlParams();
   const stateAbbr = urlParams.state?.toUpperCase();
 
   let data: WatchlistData;
   let usingLive = false;
 
-  if (mode === "live") {
-    try {
-      const live = await _fetchLive(stateAbbr);
-      if (live) { data = live; usingLive = true; } else { data = generateMockData(); }
-    } catch (e) {
-      console.warn("Live fetch failed, falling back to mock:", e);
+  try {
+    const result = await _callTool("watchlist-monitor", {
+      state: stateAbbr,
+      tickers: TICKER_UNIVERSE.map((t) => t.ticker),
+    });
+    const text = result?.content?.find((c: any) => c.type === "text")?.text;
+    let parsed: WatchlistData | null = null;
+    if (text) {
+      try { parsed = JSON.parse(text) as WatchlistData; } catch {}
+    }
+    if (parsed?.tickers?.length) {
+      data = parsed;
+      usingLive = true;
+    } else {
       data = generateMockData();
     }
-  } else if (mode === "mcp") {
-    try {
-      const result = await _callTool("watchlist-monitor", { tickers: TICKER_UNIVERSE.map((t) => t.ticker) });
-      const text = result?.content?.find((c: any) => c.type === "text")?.text;
-      data = text ? (JSON.parse(text) as WatchlistData) : generateMockData();
-    } catch { data = generateMockData(); }
-  } else {
+  } catch (e) {
+    console.warn("Live fetch failed, falling back to mock:", e);
     data = generateMockData();
   }
 
