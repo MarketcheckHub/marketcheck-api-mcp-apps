@@ -312,9 +312,49 @@ pre.code-block {
     <p>Real-time brand market share dashboard with basis point tracking. Shows current vs prior period share change, segment-level conquest analysis (who is winning in SUVs, sedans, trucks), and regional share heatmaps. Always shows both absolute volume AND share percentage.</p>
   </div>
 
-  
+  <!-- Who Can Use This -->
+  <div class="section">
+    <h2>Who Can Use This</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Equity Research Analysts</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Track basis-point share gains and losses by OEM to inform pre-earnings positioning. A brand gaining 50+ bps QoQ is a leading indicator of revenue and unit-economics outperformance.</div>
+      </div><div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">OEM Strategy Teams</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">See exactly which segments your brand is winning vs losing — SUV, Truck, Crossover, Sedan — and which competitors are conquesting. Drives product, pricing, and incentive prioritization.</div>
+      </div><div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Dealer Group Operations</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Identify the brands gaining share in your region so franchise mix and used-vehicle stocking align with where retail demand is moving, not last quarter's snapshot.</div>
+      </div><div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Investor Relations / Sell-Side</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Build the narrative around state-level geographic share — which states are growth markets, which are declining — using the same Sold Summary data dealers see for their floor-plan decisions.</div>
+      </div>
+    </div>
+  </div>
 
-  
+  <!-- URL Parameters -->
+  <div class="section">
+    <h2>URL Parameters</h2>
+    <p>Pass parameters directly in the URL to pre-fill the form and auto-generate the report:</p>
+    <table class="param-table">
+      <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>api_key</code></td><td>Your MarketCheck API key (Enterprise tier required for sold-vehicles/summary)</td></tr><tr><td><code>state</code></td><td>Two-letter US state code (e.g. CA) to scope brand share regionally; omit for national</td></tr><tr><td><code>bodyType</code></td><td>Segment to highlight in the segment breakdown (e.g. SUV, Truck, Sedan); applied as a UI highlight only</td></tr><tr><td><code>embed</code></td><td>When present, hides the settings bar for iframe embedding</td></tr>
+      </tbody>
+    </table>
+    <h3>URL Examples</h3>
+    <pre class="code-block"># Basic — auto-generate a report for a VIN
+https://apps.marketcheck.com/apps/market-share-analyzer/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658
+
+# Full — with asking price, mileage, and ZIP for deal scoring
+https://apps.marketcheck.com/apps/market-share-analyzer/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;price=25000&amp;miles=35000&amp;zip=90044
+
+# Compact widget — for iframe embeds (400px width)
+https://apps.marketcheck.com/apps/market-share-analyzer/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;compact=true&amp;embed=true
+
+# Using aliases
+https://apps.marketcheck.com/apps/market-share-analyzer/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;askingPrice=25000&amp;mileage=35000&amp;zipcode=90044</pre>
+  </div>
 
   <!-- Screenshot -->
   <div class="section">
@@ -339,17 +379,12 @@ pre.code-block {
             <div class="flow-api-method">GET</div><span class="enterprise-badge">Enterprise API</span>
             <code class="flow-api-path">/api/v1/sold-vehicles/summary</code>
             <div class="flow-api-name">Sold Vehicle Summary (Market Intelligence)</div>
-          </div></div><div class="flow-parallel-line"></div><div class="flow-note">Fetch current month make rankings and prior month make rankings — in parallel for bps change</div></div><div class="flow-arrow">&#8595;</div><div class="flow-step"><div class="flow-step-header"><div class="flow-step-num">2</div><div class="flow-step-label">Segment + Regional</div><span class="flow-parallel-badge">PARALLEL</span></div><div class="flow-api-cards flow-parallel">
+          </div></div><div class="flow-parallel-line"></div><div class="flow-note">Fetch current month make rankings and prior month make rankings — in parallel for bps change</div></div><div class="flow-arrow">&#8595;</div><div class="flow-step"><div class="flow-step-header"><div class="flow-step-num">2</div><div class="flow-step-label">Segment Breakdown</div><span class="flow-sequential-badge">SEQUENTIAL</span></div><div class="flow-api-cards flow-sequential">
           <div class="flow-api-card enterprise">
             <div class="flow-api-method">GET</div><span class="enterprise-badge">Enterprise API</span>
             <code class="flow-api-path">/api/v1/sold-vehicles/summary</code>
             <div class="flow-api-name">Sold Vehicle Summary (Market Intelligence)</div>
-          </div>
-          <div class="flow-api-card enterprise">
-            <div class="flow-api-method">GET</div><span class="enterprise-badge">Enterprise API</span>
-            <code class="flow-api-path">/api/v1/sold-vehicles/summary</code>
-            <div class="flow-api-name">Sold Vehicle Summary (Market Intelligence)</div>
-          </div></div><div class="flow-parallel-line"></div><div class="flow-note">Fetch body_type segment breakdown and state-level geographic share — in parallel</div></div>
+          </div></div><div class="flow-note">Fetch body_type segment breakdown</div></div>
     </div>
   </div>
 
@@ -395,7 +430,7 @@ pre.code-block {
     <h2>What to Render</h2>
     <p>Once you have the API responses, build these UI components:</p>
     <div class="renders-list">
-      <div class="render-item"><div class="render-dot"></div>Brand share ranking table with bps change arrows</div><div class="render-item"><div class="render-dot"></div>segment conquest matrix</div><div class="render-item"><div class="render-dot"></div>geographic share heatmap</div><div class="render-item"><div class="render-dot"></div>volume vs share scatter</div><div class="render-item"><div class="render-dot"></div>momentum badges (gaining/losing/stable)</div>
+      <div class="render-item"><div class="render-dot"></div>Brand share ranking table with bps change arrows</div><div class="render-item"><div class="render-dot"></div>segment conquest matrix</div><div class="render-item"><div class="render-dot"></div>volume vs share scatter</div><div class="render-item"><div class="render-dot"></div>momentum badges (gaining/losing/stable)</div>
     </div>
   </div>
 

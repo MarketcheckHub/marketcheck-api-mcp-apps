@@ -1112,9 +1112,21 @@ const APPS = [
     ],
     apiFlow: [
       { step: 1, label: "Current vs Prior Share", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch current month make rankings and prior month make rankings — in parallel for bps change" },
-      { step: 2, label: "Segment + Regional", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch body_type segment breakdown and state-level geographic share — in parallel" },
+      { step: 2, label: "Segment Breakdown", apis: ["soldSummary"], parallel: false, note: "Fetch body_type segment breakdown" },
     ],
-    renders: "Brand share ranking table with bps change arrows, segment conquest matrix, geographic share heatmap, volume vs share scatter, momentum badges (gaining/losing/stable)",
+    renders: "Brand share ranking table with bps change arrows, segment conquest matrix, volume vs share scatter, momentum badges (gaining/losing/stable)",
+    useCases: [
+      { persona: "Equity Research Analysts", desc: "Track basis-point share gains and losses by OEM to inform pre-earnings positioning. A brand gaining 50+ bps QoQ is a leading indicator of revenue and unit-economics outperformance." },
+      { persona: "OEM Strategy Teams", desc: "See exactly which segments your brand is winning vs losing — SUV, Truck, Crossover, Sedan — and which competitors are conquesting. Drives product, pricing, and incentive prioritization." },
+      { persona: "Dealer Group Operations", desc: "Identify the brands gaining share in your region so franchise mix and used-vehicle stocking align with where retail demand is moving, not last quarter's snapshot." },
+      { persona: "Investor Relations / Sell-Side", desc: "Build the narrative around state-level geographic share — which states are growth markets, which are declining — using the same Sold Summary data dealers see for their floor-plan decisions." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (Enterprise tier required for sold-vehicles/summary)" },
+      { name: "state", desc: "Two-letter US state code (e.g. CA) to scope brand share regionally; omit for national" },
+      { name: "bodyType", desc: "Segment to highlight in the segment breakdown (e.g. SUV, Truck, Sedan); applied as a UI highlight only" },
+      { name: "embed", desc: "When present, hides the settings bar for iframe embedding" },
+    ],
   },
   {
     id: "claims-valuation-workbench",
