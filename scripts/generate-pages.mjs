@@ -23,14 +23,70 @@ const outDir = join(root, "public");
 const SITE_URL = "https://apps.marketcheck.com";
 
 const GTAG = `
-  <!-- Google tag (gtag.js) -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-QGPPMDJ4N6"></script>
+  <!-- Google Consent Mode v2 — default denied until the visitor consents -->
   <script>
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
+    gtag('consent', 'default', {
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied',
+      analytics_storage: 'denied',
+      wait_for_update: 500
+    });
+    try {
+      if (localStorage.getItem('mc_cookie_consent') === 'granted') {
+        gtag('consent', 'update', {
+          ad_storage: 'granted',
+          ad_user_data: 'granted',
+          ad_personalization: 'granted',
+          analytics_storage: 'granted'
+        });
+      }
+    } catch (e) {}
+  </script>
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-QGPPMDJ4N6"></script>
+  <script>
     gtag('js', new Date());
     gtag('config', 'G-QGPPMDJ4N6');
   </script>`;
+
+const COOKIE_BANNER = `
+<div id="mc-cookie-banner" role="dialog" aria-label="Cookie consent" style="position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;max-width:760px;margin:0 auto;background:#111827;color:#f3f4f6;border:1px solid #374151;border-radius:14px;box-shadow:0 12px 48px rgba(0,0,0,0.35);padding:16px 18px;display:none;">
+  <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;justify-content:space-between;">
+    <p style="margin:0;font-size:13px;line-height:1.6;flex:1 1 360px;">
+      We use cookies to run this site and, with your consent, analytics cookies to understand how it's used. See our
+      <a href="https://www.marketcheck.com/cookie-policy/" target="_blank" rel="noopener" style="color:#60a5fa;">Cookie Policy</a>
+      and <a href="https://www.marketcheck.com/privacy_policy/" target="_blank" rel="noopener" style="color:#60a5fa;">Privacy Policy</a>.
+    </p>
+    <div style="display:flex;gap:10px;flex:0 0 auto;">
+      <button type="button" id="mc-cookie-reject" style="font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:9px 18px;border-radius:8px;border:1px solid #4b5563;background:transparent;color:#f3f4f6;">Reject</button>
+      <button type="button" id="mc-cookie-accept" style="font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:9px 18px;border-radius:8px;border:1px solid #2563eb;background:#2563eb;color:#fff;">Accept all</button>
+    </div>
+  </div>
+</div>
+<script>
+  (function(){
+    var KEY = 'mc_cookie_consent';
+    var banner = document.getElementById('mc-cookie-banner');
+    function gtagFn(){ window.dataLayer = window.dataLayer || []; window.dataLayer.push(arguments); }
+    function setChoice(state){
+      try { localStorage.setItem(KEY, state); } catch (e) {}
+      gtagFn('consent','update',{ ad_storage:state, ad_user_data:state, ad_personalization:state, analytics_storage:state });
+      if (banner) banner.style.display = 'none';
+    }
+    var accept = document.getElementById('mc-cookie-accept');
+    var reject = document.getElementById('mc-cookie-reject');
+    if (accept) accept.addEventListener('click', function(){ setChoice('granted'); });
+    if (reject) reject.addEventListener('click', function(){ setChoice('denied'); });
+    var settings = document.getElementById('mc-cookie-settings');
+    if (settings) settings.addEventListener('click', function(e){ e.preventDefault(); if (banner) banner.style.display = 'block'; });
+    var stored = null;
+    try { stored = localStorage.getItem(KEY); } catch (e) {}
+    if (stored !== 'granted' && stored !== 'denied' && banner) banner.style.display = 'block';
+  })();
+</script>`;
 
 function sharedCSS() {
   return `
@@ -195,8 +251,15 @@ function footerHTML() {
     <a href="https://developers.marketcheck.com" target="_blank">Get Free API Key</a>
     <a href="https://github.com/MarketcheckHub/marketcheck-api-mcp-apps" target="_blank">GitHub</a>
   </div>
+  <div class="footer-links">
+    <a href="https://www.marketcheck.com/privacy_policy/" target="_blank" rel="noopener">Privacy Policy</a>
+    <a href="https://www.marketcheck.com/terms_of_service/" target="_blank" rel="noopener">Terms of Service</a>
+    <a href="https://www.marketcheck.com/cookie-policy/" target="_blank" rel="noopener">Cookie Policy</a>
+    <a href="#" id="mc-cookie-settings">Cookie Settings</a>
+  </div>
   <p>&copy; ${new Date().getFullYear()} MarketCheck. Powered by real-time automotive data covering 95%+ of US dealer inventory.</p>
-</footer>`;
+</footer>
+${COOKIE_BANNER}`;
 }
 
 // ── Screenshot Discovery ────────────────────────────────────────────────
