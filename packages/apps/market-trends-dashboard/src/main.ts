@@ -66,7 +66,208 @@ function _mcIncentives(p) { const q={...p}; if(q.oem&&!q.make){q.make=q.oem;dele
 function _mcUkActive(p) { return _mcApi("/search/car/uk/active", p); }
 function _mcUkRecent(p) { return _mcApi("/search/car/uk/recents", p); }
 
-async function _fetchDirect(_args) { return null; /* passthrough — uses MCP mode */ }
+// ── Date helpers (timezone-safe — avoid toISOString shifts) ────────────
+function _fmtYMD(y: number, m: number, d: number): string {
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+function _firstOfMonth(d: Date): string {
+  return _fmtYMD(d.getFullYear(), d.getMonth() + 1, 1);
+}
+function _lastOfMonth(d: Date): string {
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  return _fmtYMD(d.getFullYear(), d.getMonth() + 1, last);
+}
+function _shiftMonths(d: Date, n: number): Date {
+  const r = new Date(d); r.setMonth(r.getMonth() + n); return r;
+}
+function _periodMonths(p: string): number {
+  return p === "30d" ? 1 : p === "60d" ? 2 : p === "90d" ? 3 : p === "6M" ? 6 : 12;
+}
+function _periodWindow(p: string): { from: string; to: string; priorFrom: string; priorTo: string } {
+  const months = _periodMonths(p);
+  const end = _shiftMonths(new Date(), -1);
+  const start = _shiftMonths(end, -(months - 1));
+  const priorEnd = _shiftMonths(start, -1);
+  const priorStart = _shiftMonths(priorEnd, -(months - 1));
+  return {
+    from: _firstOfMonth(start), to: _lastOfMonth(end),
+    priorFrom: _firstOfMonth(priorStart), priorTo: _lastOfMonth(priorEnd),
+  };
+}
+
+async function _fetchDirect(): Promise<any> {
+  if (!_getAuth().value) return null;
+  const win = _periodWindow(filters.period);
+  const stateP: any = filters.geography && filters.geography !== "National" ? { state: filters.geography } : {};
+  const inv = filters.inventoryType === "Both" ? undefined : filters.inventoryType;
+  const baseCurr: any = { date_from: win.from, date_to: win.to, inventory_type: inv, ...stateP };
+  const basePrior: any = { date_from: win.priorFrom, date_to: win.priorTo, inventory_type: inv, ...stateP };
+
+  const [byModelCurr, byModelPrior, byBody, byMakeCurr, byState] = await Promise.all([
+    _mcSold({ ...baseCurr, ranking_dimensions: "make,model", ranking_measure: "sold_count", ranking_order: "desc", top_n: 50 }).catch(() => null),
+    _mcSold({ ...basePrior, ranking_dimensions: "make,model", ranking_measure: "sold_count", ranking_order: "desc", top_n: 50 }).catch(() => null),
+    _mcSold({ ...baseCurr, ranking_dimensions: "body_type", ranking_measure: "sold_count", ranking_order: "desc", top_n: 20 }).catch(() => null),
+    _mcSold({ ...baseCurr, ranking_dimensions: "make", ranking_measure: "sold_count", ranking_order: "desc", top_n: 30 }).catch(() => null),
+    _mcSold({ ...baseCurr, summary_by: "state", ranking_measure: "sold_count", ranking_order: "desc", top_n: 60 }).catch(() => null),
+  ]);
+
+  const modelRowsCurr: any[] = byModelCurr?.data ?? [];
+  if (!modelRowsCurr.length) return null;
+  const modelRowsPrior: any[] = byModelPrior?.data ?? [];
+  const bodyRows: any[] = byBody?.data ?? [];
+  const makeRows: any[] = byMakeCurr?.data ?? [];
+  const stateRows: any[] = byState?.data ?? [];
+
+  const totalSold = modelRowsCurr.reduce((s, r) => s + (r.sold_count ?? 0), 0);
+  const wPrice = modelRowsCurr.reduce((s, r) => s + (r.average_sale_price ?? 0) * (r.sold_count ?? 0), 0);
+  const avgPrice = totalSold > 0 ? wPrice / totalSold : 0;
+  const wDom = modelRowsCurr.reduce((s, r) => s + (r.average_days_on_market ?? 0) * (r.sold_count ?? 0), 0);
+  const avgDom = totalSold > 0 ? wDom / totalSold : 0;
+  const totalMakeSold = makeRows.reduce((s, r) => s + (r.sold_count ?? 0), 0);
+  const wOverMsrp = makeRows.reduce((s, r) => s + (r.price_over_msrp_percentage ?? 0) * (r.sold_count ?? 0), 0);
+  const overMsrpPct = totalMakeSold > 0 ? wOverMsrp / totalMakeSold : 0;
+  const totalSoldPrior = modelRowsPrior.reduce((s, r) => s + (r.sold_count ?? 0), 0);
+  const soldMomPct = totalSoldPrior > 0 ? ((totalSold - totalSoldPrior) / totalSoldPrior) * 100 : 0;
+  const wPricePrior = modelRowsPrior.reduce((s, r) => s + (r.average_sale_price ?? 0) * (r.sold_count ?? 0), 0);
+  const priorAvg = totalSoldPrior > 0 ? wPricePrior / totalSoldPrior : avgPrice;
+  const priceDelta = avgPrice - priorAvg;
+
+  const findPrior = (mk: string, md: string) => modelRowsPrior.find((p) => p.make === mk && p.model === md);
+  const toMover = (r: any, i: number): any => {
+    const pri = findPrior(r.make, r.model);
+    const priorCount = pri?.sold_count ?? 0;
+    const mom = priorCount > 0 ? ((r.sold_count - priorCount) / priorCount) * 100 : 0;
+    return {
+      rank: i + 1, make: r.make, model: r.model,
+      soldCount: r.sold_count ?? 0,
+      avgPrice: Math.round(r.average_sale_price ?? 0),
+      avgDom: Math.round(r.average_days_on_market ?? 0),
+      momChangePct: +mom.toFixed(1),
+    };
+  };
+  const sortedByVol = modelRowsCurr.filter((r) => r.make && r.model).sort((a, b) => (b.sold_count ?? 0) - (a.sold_count ?? 0));
+  const fastest = sortedByVol.slice(0, 10).map(toMover);
+  const sortedByDom = modelRowsCurr.filter((r) => r.make && r.model && (r.average_days_on_market ?? 0) > 0).sort((a, b) => (b.average_days_on_market ?? 0) - (a.average_days_on_market ?? 0));
+  const slowest = sortedByDom.slice(0, 10).map(toMover);
+
+  const priceMoversAll: any[] = [];
+  for (const r of modelRowsCurr) {
+    if (!r.make || !r.model || (r.sold_count ?? 0) < 50) continue;
+    const pri = findPrior(r.make, r.model);
+    const prior = pri?.average_sale_price ?? 0;
+    const curr = r.average_sale_price ?? 0;
+    if (prior === 0 || curr === 0) continue;
+    const dollar = curr - prior;
+    const pct = (dollar / prior) * 100;
+    priceMoversAll.push({
+      make: r.make, model: r.model,
+      currentAvgPrice: Math.round(curr), priorAvgPrice: Math.round(prior),
+      changeDollar: Math.round(dollar), changePct: +pct.toFixed(1),
+    });
+  }
+  priceMoversAll.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
+  const priceMovers = priceMoversAll.slice(0, 10);
+
+  const segColors = ["#3b82f6", "#8b5cf6", "#f59e0b", "#ef4444", "#10b981", "#6b7280", "#06b6d4", "#a855f7"];
+
+  // ── Segment Mix ──────────────────────────────────────────────────────
+  // Primary: dedicated body_type summary call (byBody).
+  // Fallback: aggregate body_type from the make+model rows (already loaded).
+  function _buildSegmentMix(rows: any[]): SegmentSlice[] {
+    const totals: Record<string, number> = {};
+    for (const r of rows) {
+      const bt = r.body_type;
+      if (bt && r.sold_count) totals[bt] = (totals[bt] ?? 0) + r.sold_count;
+    }
+    const grand = Object.values(totals).reduce((s, v) => s + v, 0);
+    return Object.entries(totals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([label, count], i) => ({
+        label, count,
+        pct: grand > 0 ? +((count / grand) * 100).toFixed(1) : 0,
+        color: segColors[i % segColors.length],
+      }));
+  }
+
+  const totalBody = bodyRows.reduce((s, r) => s + (r.sold_count ?? 0), 0);
+  const segFromBody = bodyRows
+    .filter((r) => r.body_type)
+    .sort((a, b) => (b.sold_count ?? 0) - (a.sold_count ?? 0))
+    .slice(0, 6)
+    .map((r, i) => ({
+      label: r.body_type, count: r.sold_count ?? 0,
+      pct: totalBody > 0 ? +((r.sold_count / totalBody) * 100).toFixed(1) : 0,
+      color: segColors[i % segColors.length],
+    }));
+  const segmentMix = segFromBody.length ? segFromBody : _buildSegmentMix(modelRowsCurr);
+
+  // ── Brand Residual Value ─────────────────────────────────────────────
+  // Primary: dedicated make-level summary call (byMakeCurr) using
+  //   average_sale_price / avg_msrp * 100  (direct ratio, not the pct field).
+  // Fallback: aggregate weighted avg from make+model rows.
+  function _buildBrandResiduals(rows: any[]): BrandResidual[] {
+    // Weighted aggregation: Σ(sale_price * sold_count) / Σ(msrp * sold_count) per make
+    const agg: Record<string, { saleSum: number; msrpSum: number }> = {};
+    for (const r of rows) {
+      if (!r.make) continue;
+      const cnt = r.sold_count ?? 0;
+      const sale = r.average_sale_price ?? 0;
+      const msrp = r.avg_msrp ?? 0;
+      if (cnt === 0 || sale === 0 || msrp === 0) continue;
+      if (!agg[r.make]) agg[r.make] = { saleSum: 0, msrpSum: 0 };
+      agg[r.make].saleSum += sale * cnt;
+      agg[r.make].msrpSum += msrp * cnt;
+    }
+    return Object.entries(agg)
+      .filter(([_, v]) => v.msrpSum > 0)
+      .map(([brand, v]) => ({
+        brand,
+        pctMsrpRetained: +(v.saleSum / v.msrpSum * 100).toFixed(1),
+      }))
+      .filter((r) => r.pctMsrpRetained >= 50 && r.pctMsrpRetained <= 130)
+      .sort((a, b) => b.pctMsrpRetained - a.pctMsrpRetained)
+      .slice(0, 15);
+  }
+
+  const brandResidualsFromMake = _buildBrandResiduals(makeRows);
+  const brandResiduals = brandResidualsFromMake.length
+    ? brandResidualsFromMake
+    : _buildBrandResiduals(modelRowsCurr);
+
+  const stateRanking = stateRows
+    .filter((r) => r.state)
+    .sort((a, b) => (b.sold_count ?? 0) - (a.sold_count ?? 0))
+    .slice(0, 15)
+    .map((r) => ({
+      state: r.state,
+      avgPrice: Math.round(r.average_sale_price ?? 0),
+      volume: r.sold_count ?? 0,
+      avgDom: Math.round(r.average_days_on_market ?? 0),
+    }));
+
+  const fallback = getMockCache();
+  return {
+    kpis: {
+      totalSoldCount: totalSold,
+      soldMomPct: +soldMomPct.toFixed(1),
+      avgSalePrice: Math.round(avgPrice),
+      avgSalePriceDelta: Math.round(priceDelta),
+      avgDom: Math.round(avgDom),
+      avgDomTrend: 0,
+      priceOverMsrpPct: +overMsrpPct.toFixed(1),
+      priceOverMsrpTrend: 0,
+      evSharePct: fallback.kpis.evSharePct,
+      evShareTrend: fallback.kpis.evShareTrend,
+    },
+    fastestMovers: fastest.length ? fastest : fallback.fastestMovers,
+    slowestMovers: slowest.length ? slowest : fallback.slowestMovers,
+    priceMovers: priceMovers.length ? priceMovers : fallback.priceMovers,
+    segmentMix: segmentMix.length ? segmentMix : fallback.segmentMix,
+    brandResiduals: brandResiduals.length ? brandResiduals : fallback.brandResiduals,
+    stateRanking: stateRanking.length ? stateRanking : fallback.stateRanking,
+  };
+}
 
 async function _callTool(toolName, args) {
   // 1. MCP mode (Claude, VS Code, etc.)
@@ -77,8 +278,8 @@ async function _callTool(toolName, args) {
   const auth = _getAuth();
   if (auth.value) {
     try {
-      const data = await _fetchDirect(args);
-      if (data) return { content: [{ type: "text", text: JSON.stringify(data) }] };
+      const direct = await _fetchDirect();
+      if (direct) return { content: [{ type: "text", text: JSON.stringify(direct) }] };
     } catch (e) { console.warn("Direct API failed, trying proxy:", e); }
     // 3. Proxy fallback
     try {
@@ -133,6 +334,23 @@ function _addSettingsBar(headerEl?: HTMLElement) {
   headerEl.appendChild(bar);
 }
 // ── End Data Provider ──────────────────────────────────────────────────
+
+// ── roundRect polyfill (Safari < 16) ───────────────────────────────────
+(function polyfillRoundRect() {
+  if (typeof CanvasRenderingContext2D === "undefined") return;
+  const proto = CanvasRenderingContext2D.prototype as any;
+  if (proto.roundRect) return;
+  proto.roundRect = function (x: number, y: number, w: number, h: number, r: number | number[]) {
+    const rr = Array.isArray(r) ? r : [r, r, r, r];
+    const [tl, tr, br, bl] = [rr[0] ?? 0, rr[1] ?? 0, rr[2] ?? 0, rr[3] ?? 0];
+    this.moveTo(x + tl, y);
+    this.lineTo(x + w - tr, y); this.quadraticCurveTo(x + w, y, x + w, y + tr);
+    this.lineTo(x + w, y + h - br); this.quadraticCurveTo(x + w, y + h, x + w - br, y + h);
+    this.lineTo(x + bl, y + h); this.quadraticCurveTo(x, y + h, x, y + h - bl);
+    this.lineTo(x, y + tl); this.quadraticCurveTo(x, y, x + tl, y);
+    return this;
+  };
+})();
 
 // ── Responsive CSS Injection ───────────────────────────────────────────
 (function injectResponsiveStyles() {
@@ -252,6 +470,23 @@ const STATES = [
   "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY",
   "NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"
 ];
+
+const STATE_NAMES: Record<string, string> = {
+  "National": "National (All States)",
+  "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+  "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+  "FL": "Florida", "GA": "Georgia", "HI": "Hawaii", "ID": "Idaho",
+  "IL": "Illinois", "IN": "Indiana", "IA": "Iowa", "KS": "Kansas",
+  "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+  "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi",
+  "MO": "Missouri", "MT": "Montana", "NE": "Nebraska", "NV": "Nevada",
+  "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico", "NY": "New York",
+  "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio", "OK": "Oklahoma",
+  "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+  "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah",
+  "VT": "Vermont", "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
+  "WI": "Wisconsin", "WY": "Wyoming",
+};
 
 let filters: FilterState = {
   period: "90d",
@@ -402,6 +637,13 @@ function generateMockData(): DashboardData {
   };
 }
 
+// ── Mock cache (avoid jitter on filter clicks) ─────────────────────────
+let _mockCache: DashboardData | null = null;
+function getMockCache(): DashboardData {
+  if (!_mockCache) _mockCache = generateMockData();
+  return _mockCache;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function fmt$(v: number): string {
@@ -430,13 +672,12 @@ function trendColor(v: number, invertGood = false): string {
 
 // ── Render ─────────────────────────────────────────────────────────────
 
-let data: DashboardData;
+let data: DashboardData = getMockCache();
 let moverTab: "fastest" | "slowest" = "fastest";
 let stateSortCol: keyof StateRankRow = "volume";
 let stateSortDir: "asc" | "desc" = "desc";
 
 function render() {
-  data = generateMockData();
   document.body.innerHTML = "";
 
   const root = document.createElement("div");
@@ -474,11 +715,15 @@ function render() {
     _db.querySelector("#_banner_key").addEventListener("keydown", (e) => { if (e.key === "Enter") _db.querySelector("#_banner_save").click(); });
   }
 
-  // Title
+  // Header row (title + mode badge + settings)
+  const headerRow = document.createElement("div");
+  headerRow.style.cssText = `display:flex;align-items:center;gap:12px;margin-bottom:16px;`;
   const title = document.createElement("h1");
   title.textContent = "Market Trends Dashboard";
-  title.style.cssText = `font-size:24px;font-weight:700;margin-bottom:16px;color:#f1f5f9;`;
-  root.appendChild(title);
+  title.style.cssText = `font-size:24px;font-weight:700;color:#f1f5f9;margin:0;`;
+  headerRow.appendChild(title);
+  _addSettingsBar(headerRow);
+  root.appendChild(headerRow);
 
   // Filter Bar
   root.appendChild(buildFilterBar());
@@ -511,12 +756,19 @@ function buildFilterBar(): HTMLElement {
     background:#1e293b;border-radius:10px;padding:12px 16px;margin-bottom:16px;
   `;
 
+  const divider = () => {
+    const d = document.createElement("div");
+    d.style.cssText = `width:1px;height:28px;background:#334155;align-self:center;flex-shrink:0;`;
+    return d;
+  };
+
   // Period pills
   const periodGroup = pillGroup("Period", ["30d", "60d", "90d", "6M", "1Y"], filters.period, (v) => {
     filters.period = v;
     fetchData();
   });
   bar.appendChild(periodGroup);
+  bar.appendChild(divider());
 
   // Geography dropdown
   const geoWrap = document.createElement("div");
@@ -530,19 +782,23 @@ function buildFilterBar(): HTMLElement {
     background:#334155;color:#e2e8f0;border:1px solid #475569;border-radius:6px;
     padding:6px 10px;font-size:13px;cursor:pointer;outline:none;
   `;
+  sel.title = STATE_NAMES[filters.geography] ?? filters.geography;
   STATES.forEach((s) => {
     const opt = document.createElement("option");
     opt.value = s;
     opt.textContent = s;
+    opt.title = STATE_NAMES[s] ?? s;
     if (s === filters.geography) opt.selected = true;
     sel.appendChild(opt);
   });
   sel.addEventListener("change", () => {
     filters.geography = sel.value;
+    sel.title = STATE_NAMES[sel.value] ?? sel.value;
     fetchData();
   });
   geoWrap.appendChild(sel);
   bar.appendChild(geoWrap);
+  bar.appendChild(divider());
 
   // Inventory Type toggle
   bar.appendChild(
@@ -560,6 +816,7 @@ function buildFilterBar(): HTMLElement {
       fetchData();
     })
   );
+  bar.appendChild(divider());
 
   // Fuel type chips
   bar.appendChild(
@@ -1054,11 +1311,11 @@ function buildStateTable(): HTMLElement {
   const table = document.createElement("table");
   table.style.cssText = `width:100%;border-collapse:collapse;font-size:13px;`;
 
-  const cols: { key: keyof StateRankRow; label: string; align: string }[] = [
-    { key: "state", label: "State", align: "left" },
-    { key: "avgPrice", label: "Avg Price", align: "right" },
-    { key: "volume", label: "Volume", align: "right" },
-    { key: "avgDom", label: "Avg DOM", align: "right" },
+  const cols: { key: keyof StateRankRow; label: string; align: string; tooltip: string }[] = [
+    { key: "state",    label: "State",     align: "left",  tooltip: "US state \u2014 click a row to filter the dashboard to that state" },
+    { key: "avgPrice", label: "Avg Price", align: "right", tooltip: "Average sale price across all transactions recorded in this state" },
+    { key: "volume",   label: "Volume",    align: "right", tooltip: "Total number of vehicles sold in this state during the selected period" },
+    { key: "avgDom",   label: "Avg DOM",   align: "right", tooltip: "Average Days on Market \u2014 how long vehicles typically sit on the lot before selling. Lower is hotter." },
   ];
 
   const thead = document.createElement("thead");
@@ -1070,6 +1327,7 @@ function buildStateTable(): HTMLElement {
       text-align:${col.align};padding:8px 6px;color:#94a3b8;font-weight:600;
       font-size:11px;text-transform:uppercase;cursor:pointer;user-select:none;
     `;
+    th.title = col.tooltip;
     const sortIndicator =
       stateSortCol === col.key ? (stateSortDir === "asc" ? " \u25B2" : " \u25BC") : "";
     th.textContent = col.label + sortIndicator;
@@ -1093,12 +1351,18 @@ function buildStateTable(): HTMLElement {
     tr.style.cssText = `border-bottom:1px solid rgba(51,65,85,0.5);`;
     tr.addEventListener("mouseenter", () => (tr.style.background = "#334155"));
     tr.addEventListener("mouseleave", () => (tr.style.background = "transparent"));
-    tr.innerHTML = `
-      <td style="padding:7px 6px;color:#f1f5f9;font-weight:600;">${r.state}</td>
+
+    const stateTd = document.createElement("td");
+    stateTd.style.cssText = `padding:7px 6px;color:#f1f5f9;font-weight:600;`;
+    stateTd.textContent = r.state;
+    stateTd.title = STATE_NAMES[r.state] ?? r.state;
+
+    tr.appendChild(stateTd);
+    tr.insertAdjacentHTML("beforeend", `
       <td style="padding:7px 6px;text-align:right;color:#cbd5e1;">${fmt$(r.avgPrice)}</td>
       <td style="padding:7px 6px;text-align:right;color:#cbd5e1;">${fmtN(r.volume)}</td>
       <td style="padding:7px 6px;text-align:right;color:#cbd5e1;">${r.avgDom}d</td>
-    `;
+    `);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
@@ -1107,24 +1371,37 @@ function buildStateTable(): HTMLElement {
   return wrap;
 }
 
-// ── MCP Data Fetch ─────────────────────────────────────────────────────
-
+// ── Live Data Fetch ────────────────────────────────────────────────────
 
 async function fetchData() {
-  try {
-    await _callTool("market-trends-dashboard", {
-        state: filters.geography,
-        inventoryType: filters.inventoryType,
-        bodyType: filters.bodyType,
-        fuelType: filters.fuelType,
-        period: filters.period,
-      });
-  } catch {
-    // Server tool not available; use mock data
-  }
+  // Render mock immediately (instant first paint)
   render();
+  if (!_getAuth().value) return;
+  try {
+    const live = await _fetchDirect();
+    if (live) {
+      data = live;
+      render();
+    }
+  } catch (e) {
+    console.warn("Live sold-summary fetch failed, keeping mock data:", e);
+  }
 }
 
 // ── Bootstrap ──────────────────────────────────────────────────────────
 
-render();
+(function seedFiltersFromUrl() {
+  const p = _getUrlParams();
+  if (p.state && STATES.includes(p.state)) filters.geography = p.state;
+  const sp = new URLSearchParams(location.search);
+  const period = sp.get("period");
+  if (period && ["30d", "60d", "90d", "6M", "1Y"].includes(period)) filters.period = period;
+  const inv = sp.get("inventory") ?? sp.get("inventoryType");
+  if (inv && ["New", "Used", "Both"].includes(inv)) filters.inventoryType = inv;
+  const body = sp.get("body") ?? sp.get("bodyType");
+  if (body && ["All", "SUV", "Sedan", "Truck"].includes(body)) filters.bodyType = body;
+  const fuel = sp.get("fuel") ?? sp.get("fuelType");
+  if (fuel && ["All", "ICE", "EV", "Hybrid"].includes(fuel)) filters.fuelType = fuel;
+})();
+
+fetchData();
