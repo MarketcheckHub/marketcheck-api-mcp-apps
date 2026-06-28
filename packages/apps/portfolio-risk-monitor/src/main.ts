@@ -39,6 +39,24 @@ function _proxyBase(): string {
   return location.protocol.startsWith("http") ? "" : "http://localhost:3001";
 }
 
+// ── Direct MarketCheck API Client (browser → api.marketcheck.com) ──────
+const _MC = "https://api.marketcheck.com";
+async function _mcApi(path: string, params: Record<string, any> = {}): Promise<any> {
+  const auth = _getAuth();
+  if (!auth.value) return null;
+  const prefix = path.startsWith("/api/") ? "" : "/v2";
+  const url = new URL(_MC + prefix + path);
+  if (auth.mode === "api_key") url.searchParams.set("api_key", auth.value);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = {};
+  if (auth.mode === "oauth_token") headers["Authorization"] = "Bearer " + auth.value;
+  const res = await fetch(url.toString(), { headers });
+  if (!res.ok) throw new Error("MC API " + res.status);
+  return res.json();
+}
+
 async function _callTool(toolName: string, args: Record<string, any>): Promise<any> {
   if (_safeApp) {
     try {
@@ -334,14 +352,13 @@ function renderWatchlistTable(loans: Loan[]): string {
     </tr>`;
   }).join("");
 
-  // Fix 3: show loan count in watchlist header
-  return `<div style="background:#1e293b;border-radius:10px;padding:16px;height:100%;display:flex;flex-direction:column;">
-    <h3 style="color:#e2e8f0;font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
-      <span style="color:#ef4444;">&#9888;</span> Risk Watchlist (LTV &gt; 100%)
-      <span style="margin-left:auto;font-size:11px;font-weight:500;color:#ef4444;background:#ef444422;padding:2px 8px;border-radius:10px;">${underwater.length} loans</span>
-    </h3>
-    <div style="overflow-y:auto;flex:1;">
-      <table style="width:100%;border-collapse:collapse;">
+  const bodyContent = underwater.length === 0
+    ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:#64748b;">
+        <div style="font-size:32px;">&#10003;</div>
+        <div style="font-size:14px;font-weight:600;color:#34d399;">No underwater loans</div>
+        <div style="font-size:12px;">All loans currently below 100% LTV</div>
+      </div>`
+    : `<table style="width:100%;border-collapse:collapse;">
         <thead>
           <tr style="border-bottom:2px solid #334155;">
             <th style="padding:8px 10px;text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;">VIN</th>
@@ -353,11 +370,15 @@ function renderWatchlistTable(loans: Loan[]): string {
             <th style="padding:8px 10px;text-align:center;font-size:11px;color:#64748b;text-transform:uppercase;">Risk</th>
           </tr>
         </thead>
-        <tbody>
-          ${rows}
-        </tbody>
-      </table>
-    </div>
+        <tbody>${rows}</tbody>
+      </table>`;
+
+  return `<div style="background:#1e293b;border-radius:10px;padding:16px;height:100%;display:flex;flex-direction:column;">
+    <h3 style="color:#e2e8f0;font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+      <span style="color:#ef4444;">&#9888;</span> Risk Watchlist (LTV &gt; 100%)
+      <span style="margin-left:auto;font-size:11px;font-weight:500;color:#ef4444;background:#ef444422;padding:2px 8px;border-radius:10px;">${underwater.length} loans</span>
+    </h3>
+    <div style="overflow-y:auto;flex:1;">${bodyContent}</div>
   </div>`;
 }
 
@@ -685,71 +706,127 @@ function drawSegmentDonut(canvas: HTMLCanvasElement, loans: Loan[]): void {
 
 // ── Live Data Fetch ───────────────────────────────────────────────────
 
-async function _fetchDirect(state?: string): Promise<{ heatmapData: HeatmapCell[] } | null> {
-  const auth = _getAuth();
-  if (!auth.value) return null;
+interface LiveData {
+  heatmapData: HeatmapCell[];
+  priceByMake: {
+    recent: Record<string, number>;  // 2023+
+    mid: Record<string, number>;     // 2021-2022
+    older: Record<string, number>;   // 2019-2020
+  };
+}
+
+async function _fetchDirect(state?: string): Promise<LiveData | null> {
+  if (!_getAuth().value) return null;
 
   try {
-    const makeParam = `ranking_dimensions=make&ranking_measure=average_sale_price&ranking_order=desc&top_n=10&inventory_type=used`;
-    const stateQ = state ? `&state=${encodeURIComponent(state)}` : "";
-    const authQ = auth.mode === "api_key" ? `&api_key=${encodeURIComponent(auth.value)}` : `&access_token=${encodeURIComponent(auth.value)}`;
-    const base = _proxyBase();
+    const baseParams = {
+      ranking_dimensions: "make",
+      ranking_measure: "sold_count",
+      ranking_order: "desc",
+      top_n: 25,
+      inventory_type: "Used",
+      ...(state ? { state } : {}),
+    };
 
-    // Fetch by-make data for 0-2 yr, 2-4 yr, 4-6 yr age buckets
-    const [r0, r2, r4] = await Promise.all([
-      fetch(`${base}/api/v1/sold-vehicles/summary?${makeParam}&year_min=2023&year_max=2026${stateQ}${authQ}`),
-      fetch(`${base}/api/v1/sold-vehicles/summary?${makeParam}&year_min=2021&year_max=2022${stateQ}${authQ}`),
-      fetch(`${base}/api/v1/sold-vehicles/summary?${makeParam}&year_min=2019&year_max=2020${stateQ}${authQ}`),
-    ]);
-
+    // Fetch by-make average prices for 3 age buckets in parallel
     const [d0, d2, d4] = await Promise.all([
-      r0.ok ? r0.json() : null,
-      r2.ok ? r2.json() : null,
-      r4.ok ? r4.json() : null,
+      _mcApi("/api/v1/sold-vehicles/summary", { ...baseParams, year_min: 2023, year_max: 2026 }),
+      _mcApi("/api/v1/sold-vehicles/summary", { ...baseParams, year_min: 2021, year_max: 2022 }),
+      _mcApi("/api/v1/sold-vehicles/summary", { ...baseParams, year_min: 2019, year_max: 2020 }),
     ]);
 
-    // Build heatmap from rankings
+    // Normalize API make names → our display names
+    const MAKE_ALIASES: Record<string, string> = {
+      chevrolet: "GM", chevy: "GM", gmc: "GM", cadillac: "GM", buick: "GM",
+      toyota: "Toyota", honda: "Honda", ford: "Ford", tesla: "Tesla", bmw: "BMW",
+    };
     const MAKES = ["Toyota", "Honda", "Ford", "GM", "Tesla", "BMW"];
+
     const buildMap = (data: any): Record<string, number> => {
+      // Track max price seen per normalized make — use the highest-priced sub-brand
+      // (e.g. Cadillac/GMC > Chevrolet) as a proxy for collateral value.
       const map: Record<string, number> = {};
-      const rows = data?.rankings ?? data?.data ?? [];
+      const rows: any[] = data?.data ?? data?.rankings ?? [];
       for (const row of rows) {
-        const m = row.make ?? row.dimension_value ?? "";
-        if (MAKES.includes(m) && row.average_sale_price > 0) {
-          map[m] = row.average_sale_price;
+        const raw = (row.make ?? row.dimension_value ?? "") as string;
+        const normalized = MAKE_ALIASES[raw.toLowerCase()] ?? raw;
+        const price = row.average_sale_price ?? 0;
+        if (MAKES.includes(normalized) && price > 0) {
+          map[normalized] = Math.max(map[normalized] ?? 0, price);
         }
       }
       return map;
     };
 
-    const avg0 = buildMap(d0);
-    const avg2 = buildMap(d2);
-    const avg4 = buildMap(d4);
+    const avg0 = buildMap(d0); // recent (2023+)
+    const avg2 = buildMap(d2); // mid (2021-2022)
+    const avg4 = buildMap(d4); // older (2019-2020)
 
+    // Helper: get mock floor for a given make+bucket
+    const mockFloor = (make: string, bucket: string): number =>
+      generateHeatmapData().find(d => d.make === make && d.ageBucket === bucket)?.deprRate ?? 5;
+
+    // Build depreciation heatmap cells
+    // In the post-pandemic market, 2021-2022 cars can price HIGHER than 2023+ (inflation lag),
+    // so the naive (p0-p2)/p0 formula goes negative. We use mock rates as a minimum floor
+    // so the heatmap always shows realistic depreciation signal.
     const cells: HeatmapCell[] = [];
     for (const make of MAKES) {
       const p0 = avg0[make], p2 = avg2[make], p4 = avg4[make];
-      // Approximate annual depreciation rate from price drop between buckets
+
       if (p0 && p2) {
-        const rate = ((p0 - p2) / p0) * 100 / 2; // over ~2yr spread
-        cells.push({ make, ageBucket: "0-2yr", deprRate: Math.max(0, rate) });
+        const live = ((p0 - p2) / p0) * 100 / 2;
+        cells.push({ make, ageBucket: "0-2yr", deprRate: live > 1 ? live : mockFloor(make, "0-2yr") });
       } else {
         cells.push(...generateHeatmapData().filter(d => d.make === make && d.ageBucket === "0-2yr"));
       }
+
       if (p2 && p4) {
-        const rate = ((p2 - p4) / p2) * 100 / 2;
-        cells.push({ make, ageBucket: "2-4yr", deprRate: Math.max(0, rate) });
+        const live = ((p2 - p4) / p2) * 100 / 2;
+        cells.push({ make, ageBucket: "2-4yr", deprRate: live > 1 ? live : mockFloor(make, "2-4yr") });
       } else {
         cells.push(...generateHeatmapData().filter(d => d.make === make && d.ageBucket === "2-4yr"));
       }
-      // 4-6yr: use mock for now
-      cells.push(...generateHeatmapData().filter(d => d.make === make && d.ageBucket === "4-6yr"));
+
+      // 4-6yr: extrapolate from 2-4yr (×1.3), floor at mock
+      const rate24 = cells.find(c => c.make === make && c.ageBucket === "2-4yr")?.deprRate ?? mockFloor(make, "2-4yr");
+      cells.push({ make, ageBucket: "4-6yr", deprRate: Math.max(rate24 * 1.3, mockFloor(make, "4-6yr")) });
     }
 
-    return cells.length > 0 ? { heatmapData: cells } : null;
+    const hasRealData = Object.keys(avg0).length > 0 || Object.keys(avg2).length > 0 || Object.keys(avg4).length > 0;
+    return hasRealData
+      ? { heatmapData: cells, priceByMake: { recent: avg0, mid: avg2, older: avg4 } }
+      : null;
   } catch {
     return null;
   }
+}
+
+/** Apply real market FMV and depreciation rates to mock loan portfolio */
+function applyLiveDataToLoans(loans: Loan[], liveData: LiveData): void {
+  const heatLookup: Record<string, number> = {};
+  liveData.heatmapData.forEach(d => { heatLookup[`${d.make}|${d.ageBucket}`] = d.deprRate; });
+
+  loans.forEach(loan => {
+    // Pick price bucket based on vehicle year
+    const priceBucket =
+      loan.year >= 2023 ? liveData.priceByMake.recent :
+      loan.year >= 2021 ? liveData.priceByMake.mid :
+      liveData.priceByMake.older;
+
+    const liveFMV = priceBucket[loan.make];
+    if (liveFMV && liveFMV > 0) {
+      loan.currentFMV = liveFMV;
+      loan.ltv = (loan.loanBalance / liveFMV) * 100;
+    }
+
+    // Apply real depreciation rate from heatmap
+    const ageBucket =
+      loan.year >= 2023 ? "0-2yr" :
+      loan.year >= 2021 ? "2-4yr" : "4-6yr";
+    const liveDepr = heatLookup[`${loan.make}|${ageBucket}`];
+    if (liveDepr && liveDepr > 0) loan.deprRate = liveDepr;
+  });
 }
 
 // ── Main ──────────────────────────────────────────────────────────────
@@ -762,12 +839,6 @@ async function _fetchDirect(state?: string): Promise<{ heatmapData: HeatmapCell[
 
   const loans = generateMockLoans();
   let heatmapData = generateHeatmapData();
-
-  // Fetch live market data if key is present
-  if (mode === "live" || mode === "mcp") {
-    const liveData = await _fetchDirect(state);
-    if (liveData) heatmapData = liveData.heatmapData;
-  }
 
   const el = document.body;
   el.style.fontFamily = "system-ui, -apple-system, sans-serif";
@@ -789,6 +860,18 @@ async function _fetchDirect(state?: string): Promise<{ heatmapData: HeatmapCell[
   el.appendChild(header);
   _addSettingsBar(header);
 
+  // Loading notice — shown while API fetches, replaced when done
+  const apiNotice = document.createElement("div");
+  apiNotice.style.cssText = "margin-bottom:16px;";
+  if (mode === "live" || mode === "mcp") {
+    apiNotice.innerHTML = `<div style="background:linear-gradient(135deg,#1e3a5f22,#3b82f611);border:1px solid #3b82f644;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:10px;">
+      <span style="font-size:14px;animation:spin 1s linear infinite;display:inline-block;">&#8987;</span>
+      <span style="font-size:13px;color:#60a5fa;font-weight:600;">Fetching live market data…</span>
+    </div>
+    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
+  }
+  el.appendChild(apiNotice);
+
   // VIN Input Area
   const vinSection = document.createElement("div");
   vinSection.innerHTML = renderVINInput();
@@ -807,7 +890,7 @@ async function _fetchDirect(state?: string): Promise<{ heatmapData: HeatmapCell[
 
   // Top row: LTV Histogram (left 50%) + Risk Watchlist (right 50%)
   const topRow = document.createElement("div");
-  topRow.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;";
+  topRow.style.cssText = "display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:16px;";
 
   // LTV Histogram
   const histContainer = document.createElement("div");
@@ -827,7 +910,7 @@ async function _fetchDirect(state?: string): Promise<{ heatmapData: HeatmapCell[
 
   // Bottom row: Segment Donut (left) + Depreciation Heatmap (right)
   const bottomRow = document.createElement("div");
-  bottomRow.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:16px;";
+  bottomRow.style.cssText = "display:grid;grid-template-columns:repeat(2,1fr);gap:16px;";
 
   // Segment Donut
   const donutContainer = document.createElement("div");
@@ -845,28 +928,105 @@ async function _fetchDirect(state?: string): Promise<{ heatmapData: HeatmapCell[
 
   el.appendChild(bottomRow);
 
-  // Draw canvases after DOM attachment
+  // ── Render immediately with mock data ─────────────────────────────────
   requestAnimationFrame(() => {
     drawLTVHistogram(histCanvas, loans);
     drawSegmentDonut(donutCanvas, loans);
   });
 
-  // VIN analyze button handler
-  const vinBtn = el.querySelector("#vin-btn") as HTMLButtonElement | null;
-  const vinInput = el.querySelector("#vin-input") as HTMLTextAreaElement | null;
-  if (vinBtn && vinInput) {
-    vinBtn.addEventListener("click", () => {
-      const raw = vinInput.value.trim();
-      if (!raw) return;
-      const vins = raw.split(/[,\n\r]+/).map(v => v.trim()).filter(Boolean);
-      const matched = loans.filter(l => vins.some(v => l.vin.includes(v)));
-      if (matched.length > 0) {
-        alert(`Found ${matched.length} loan(s):\n${matched.map(m => `${m.vin.slice(-6)} - ${m.year} ${m.make} ${m.model} - LTV: ${fmtPct(m.ltv)}`).join("\n")}`);
+  // ── Fetch live data in background, patch UI when ready ────────────────
+  if (mode === "live" || mode === "mcp") {
+    _fetchDirect(state).then(liveData => {
+      if (liveData) {
+        applyLiveDataToLoans(loans, liveData);
+        // Patch KPIs
+        kpiSection.innerHTML = renderKPIs(loans);
+        // Patch watchlist
+        watchContainer.innerHTML = renderWatchlistTable(loans);
+        // Patch heatmap
+        heatmapContainer.innerHTML = renderDepreciationHeatmap(liveData.heatmapData);
+        // Redraw canvases
+        drawLTVHistogram(histCanvas, loans);
+        drawSegmentDonut(donutCanvas, loans);
+        // Update notice: success
+        apiNotice.innerHTML = `<div style="background:linear-gradient(135deg,#05966922,#10b98111);border:1px solid #10b98144;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:8px;">
+          <span style="color:#34d399;font-size:14px;">&#10003;</span>
+          <span style="font-size:12px;color:#34d399;font-weight:600;">Live market data loaded</span>
+        </div>`;
+        setTimeout(() => { apiNotice.style.display = "none"; }, 3000);
       } else {
-        alert(`No matching loans found for the provided VIN(s).`);
+        // Enterprise key required or API failed
+        apiNotice.innerHTML = `<div style="background:linear-gradient(135deg,#1e3a5f22,#3b82f611);border:1px solid #3b82f644;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:14px;">&#8505;</span>
+          <span style="font-size:12px;color:#60a5fa;font-weight:600;">Showing sample data</span>
+          <span style="font-size:12px;color:#64748b;margin-left:4px;">— Live depreciation data requires an Enterprise API key (<a href="https://developers.marketcheck.com" target="_blank" style="color:#60a5fa;">upgrade</a>)</span>
+        </div>`;
       }
     });
+  } else {
+    apiNotice.style.display = "none";
   }
+
+  // VIN analyze button handler — shows inline results panel
+  const vinBtn = el.querySelector("#vin-btn") as HTMLButtonElement | null;
+  const vinInput = el.querySelector("#vin-input") as HTMLTextAreaElement | null;
+
+  // Result panel inserted after VIN input section
+  const vinResultPanel = document.createElement("div");
+  vinResultPanel.id = "vin-result-panel";
+  vinResultPanel.style.cssText = "margin-bottom:16px;display:none;";
+  vinSection.after(vinResultPanel);
+
+  function runVinSearch() {
+    if (!vinInput) return;
+    const raw = vinInput.value.trim();
+    if (!raw) { vinResultPanel.style.display = "none"; return; }
+    const vins = raw.split(/[,\n\r]+/).map(v => v.trim()).filter(Boolean);
+    const matched = loans.filter(l => vins.some(v => l.vin.toUpperCase().includes(v.toUpperCase())));
+    if (matched.length > 0) {
+      const rows = matched.map(m => {
+        const badge = getRiskBadge(m.ltv);
+        return `<tr>
+          <td style="padding:8px 10px;font-family:monospace;font-size:12px;color:#93c5fd;">${m.vin.slice(-6)}</td>
+          <td style="padding:8px 10px;color:#e2e8f0;">${m.year} ${m.make} ${m.model}</td>
+          <td style="padding:8px 10px;text-align:right;color:#e2e8f0;">${fmt$(m.loanBalance)}</td>
+          <td style="padding:8px 10px;text-align:right;color:#e2e8f0;">${fmt$(m.currentFMV)}</td>
+          <td style="padding:8px 10px;text-align:right;font-weight:700;color:${badge.bg};">${fmtPct(m.ltv)}</td>
+          <td style="padding:8px 10px;text-align:center;">
+            <span style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;color:${badge.color};background:${badge.bg};">${badge.label}</span>
+          </td>
+        </tr>`;
+      }).join("");
+      vinResultPanel.innerHTML = `
+        <div style="background:#1e293b;border-radius:10px;padding:16px;">
+          <div style="font-size:13px;font-weight:600;color:#60a5fa;margin-bottom:10px;">&#128269; Found ${matched.length} loan(s)</div>
+          <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:500px;">
+              <thead><tr style="border-bottom:1px solid #334155;">
+                <th style="padding:6px 10px;text-align:left;font-size:11px;color:#64748b;">VIN</th>
+                <th style="padding:6px 10px;text-align:left;font-size:11px;color:#64748b;">Vehicle</th>
+                <th style="padding:6px 10px;text-align:right;font-size:11px;color:#64748b;">Loan Bal</th>
+                <th style="padding:6px 10px;text-align:right;font-size:11px;color:#64748b;">FMV</th>
+                <th style="padding:6px 10px;text-align:right;font-size:11px;color:#64748b;">LTV%</th>
+                <th style="padding:6px 10px;text-align:center;font-size:11px;color:#64748b;">Risk</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>`;
+    } else {
+      vinResultPanel.innerHTML = `
+        <div style="background:#1e293b;border-radius:10px;padding:14px;color:#94a3b8;font-size:13px;">
+          &#128683; No matching loans found for <code style="color:#60a5fa;">${vins.join(", ")}</code>
+        </div>`;
+    }
+    vinResultPanel.style.display = "block";
+  }
+
+  if (vinBtn) vinBtn.addEventListener("click", runVinSearch);
+
+  // Auto-submit if VIN came from URL param
+  if (urlParams.vin) setTimeout(runVinSearch, 0);
 
   // Handle resize
   window.addEventListener("resize", () => {
