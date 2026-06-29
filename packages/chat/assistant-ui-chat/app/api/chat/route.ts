@@ -1,5 +1,5 @@
 import { anthropic } from "@ai-sdk/anthropic";
-import { streamText, tool } from "ai";
+import { streamText, tool, stepCountIs, convertToModelMessages } from "ai";
 import { z } from "zod";
 
 const MC_API_HOST = "https://api.marketcheck.com";
@@ -31,12 +31,12 @@ export async function POST(req: Request) {
     system: `You are MarketCheck AI, an expert automotive market assistant powered by real-time market data from the MarketCheck API — the largest automotive data platform covering 95%+ of US dealer inventory.
 
 You have tools to search car listings, decode VINs, predict prices, analyze sold vehicles, check incentives, evaluate deals, and estimate trade-in values. Always use tools to back up claims with real data. Format prices as currency ($XX,XXX) and mileage with commas. Be concise but thorough — lead with key findings, then supporting data. Proactively suggest follow-up analyses.`,
-    messages,
+    messages: await convertToModelMessages(messages),
     tools: {
       "search-cars": tool({
         description:
           "Search active used car listings with filters for make, model, body type, price range, year, mileage, fuel type, and location. Returns listings with dealer info, stats, and facets.",
-        parameters: z.object({
+        inputSchema: z.object({
           makes: z.string().optional().describe("Comma-separated makes, e.g. 'Toyota,Honda'"),
           bodyTypes: z.string().optional().describe("Comma-separated body types, e.g. 'SUV,Sedan'"),
           fuelTypes: z.string().optional().describe("Comma-separated fuel types, e.g. 'Gas,Electric'"),
@@ -72,7 +72,7 @@ You have tools to search car listings, decode VINs, predict prices, analyze sold
 
       "decode-vin": tool({
         description: "Decode a VIN to get full vehicle specs: year, make, model, trim, engine, transmission, drivetrain, fuel type, MPG, MSRP, and more.",
-        parameters: z.object({
+        inputSchema: z.object({
           vin: z.string().describe("17-character VIN"),
         }),
         execute: async ({ vin }) => mcFetch(`/decode/car/neovin/${vin}/specs`),
@@ -80,7 +80,7 @@ You have tools to search car listings, decode VINs, predict prices, analyze sold
 
       "predict-price": tool({
         description: "Predict fair market price for a vehicle using comparable sales. Returns predicted price, range, confidence, and comparables.",
-        parameters: z.object({
+        inputSchema: z.object({
           vin: z.string().describe("17-character VIN"),
           miles: z.number().optional().describe("Current mileage"),
           zip: z.string().optional().describe("ZIP for regional pricing"),
@@ -97,7 +97,7 @@ You have tools to search car listings, decode VINs, predict prices, analyze sold
 
       "get-car-history": tool({
         description: "Get listing history for a vehicle by VIN — price changes, dealer transfers, days on market over time.",
-        parameters: z.object({
+        inputSchema: z.object({
           vin: z.string().describe("17-character VIN"),
           sort_order: z.enum(["asc", "desc"]).optional().describe("Sort: 'asc' oldest first, 'desc' newest first"),
         }),
@@ -107,7 +107,7 @@ You have tools to search car listings, decode VINs, predict prices, analyze sold
 
       "search-sold": tool({
         description: "Search recently sold vehicles (past 90 days). Returns transaction prices and stats for market analysis.",
-        parameters: z.object({
+        inputSchema: z.object({
           make: z.string().optional().describe("Vehicle make"),
           model: z.string().optional().describe("Vehicle model"),
           year: z.string().optional().describe("Year or range, e.g. '2022' or '2020-2024'"),
@@ -129,7 +129,7 @@ You have tools to search car listings, decode VINs, predict prices, analyze sold
 
       "get-sold-summary": tool({
         description: "Aggregated sold vehicle market data — rankings by make, body_type, state, fuel_type. For market share, demand analysis, trends.",
-        parameters: z.object({
+        inputSchema: z.object({
           ranking_dimensions: z.string().optional().describe("Grouping: make, model, body_type, state, fuel_type"),
           ranking_measure: z.string().optional().describe("Measures: sold_count, average_sale_price, average_days_on_market"),
           ranking_order: z.enum(["asc", "desc"]).optional(),
@@ -145,7 +145,7 @@ You have tools to search car listings, decode VINs, predict prices, analyze sold
 
       "search-incentives": tool({
         description: "Search current OEM incentives/rebates by ZIP — cash back, APR deals, lease specials, loyalty bonuses.",
-        parameters: z.object({
+        inputSchema: z.object({
           oem: z.string().describe("Manufacturer, e.g. 'Toyota'"),
           zip: z.string().describe("ZIP code"),
           model: z.string().optional().describe("Specific model to filter"),
@@ -156,7 +156,7 @@ You have tools to search car listings, decode VINs, predict prices, analyze sold
 
       "evaluate-deal": tool({
         description: "Full deal evaluation: decode VIN, predict price, pull history, find comparables. Use when user asks 'is this a good deal?'",
-        parameters: z.object({
+        inputSchema: z.object({
           vin: z.string().describe("17-character VIN"),
           zip: z.string().optional().describe("Buyer's ZIP"),
           miles: z.number().optional().describe("Current mileage"),
@@ -189,7 +189,7 @@ You have tools to search car listings, decode VINs, predict prices, analyze sold
 
       "estimate-trade-in": tool({
         description: "Estimate trade-in value: decode VIN, predict retail + wholesale values, find comparable sold vehicles.",
-        parameters: z.object({
+        inputSchema: z.object({
           vin: z.string().describe("17-character VIN"),
           zip: z.string().optional().describe("ZIP for regional pricing"),
           miles: z.number().optional().describe("Current mileage"),
@@ -213,8 +213,8 @@ You have tools to search car listings, decode VINs, predict prices, analyze sold
         },
       }),
     },
-    maxSteps: 5,
+    stopWhen: stepCountIs(5),
   });
 
-  return result.toDataStreamResponse();
+  return result.toUIMessageStreamResponse();
 }

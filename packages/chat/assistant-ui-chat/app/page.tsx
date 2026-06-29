@@ -1,6 +1,6 @@
 "use client";
 
-import { useChat } from "ai/react";
+import { useChat } from "@ai-sdk/react";
 import { useRef, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
@@ -14,10 +14,23 @@ const SUGGESTIONS = [
 ];
 
 export default function ChatPage() {
-  const { messages, input, handleInputChange, handleSubmit, isLoading, setInput } = useChat();
+  const { messages, sendMessage, status } = useChat();
+  const [input, setInput] = useState("");
+  const isLoading = status === "submitted" || status === "streaming";
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+
+  const submitText = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    sendMessage({ text: trimmed });
+    setInput("");
+  };
+  const handleSubmit = (e?: { preventDefault?: () => void }) => {
+    e?.preventDefault?.();
+    submitText(input);
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -27,8 +40,7 @@ export default function ChatPage() {
     setExpandedTools((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const handleSuggestion = (text: string) => {
-    setInput(text);
-    setTimeout(() => document.querySelector("form")?.requestSubmit(), 50);
+    submitText(text);
   };
 
   const formatToolResult = (toolName: string, result: any) => {
@@ -197,9 +209,14 @@ export default function ChatPage() {
 
                 {/* Content */}
                 <div className={`flex-1 ${isUser ? "text-right" : ""}`} style={{ maxWidth: "85%" }}>
-                  {msg.parts?.map((part, i) => {
-                    if (part.type === "tool-invocation") {
-                      const inv = part.toolInvocation;
+                  {msg.parts?.map((part: any, i: number) => {
+                    if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
+                      const inv = {
+                        toolName: part.type === "dynamic-tool" ? part.toolName : part.type.replace(/^tool-/, ""),
+                        state: part.state === "output-available" ? "result" : part.state,
+                        args: part.input,
+                        result: part.output,
+                      };
                       const key = `${msg.id}-${i}`;
                       const isOpen = expandedTools[key];
                       const richResult = inv.state === "result" ? formatToolResult(inv.toolName, inv.result) : null;
@@ -252,17 +269,6 @@ export default function ChatPage() {
                     }
                     return null;
                   })}
-                  {!msg.parts?.length && msg.content && (
-                    <div
-                      className={`inline-block rounded-xl px-4 py-3 text-sm ${isUser ? "text-left" : ""}`}
-                      style={{
-                        background: isUser ? "var(--accent)" : "transparent",
-                        color: isUser ? "#fff" : "var(--text-primary)",
-                      }}
-                    >
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    </div>
-                  )}
                 </div>
               </div>
             );
@@ -287,8 +293,8 @@ export default function ChatPage() {
           <textarea
             ref={inputRef}
             value={input}
-            onChange={handleInputChange}
-            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(e as any); } }}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSubmit(); } }}
             placeholder="Ask about cars, prices, market trends..."
             rows={1}
             className="flex-1 resize-none rounded-xl px-4 py-3 text-sm outline-none"
