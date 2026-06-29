@@ -20,19 +20,19 @@
   <!-- Open Graph -->
   <meta property="og:type" content="article">
   <meta property="og:title" content="How to Build: Stocking Intelligence — MarketCheck Apps">
-  <meta property="og:description" content="Auction stocking guide powered by sold volume data. Shows which make/model combinations are selling fastest and at what prices in your state, broken down by body type segment.">
+  <meta property="og:description" content="Auction stocking advisor for used-car dealers. Scores up to 10 VINs with BUY/CAUTION/PASS verdicts, or loads a rooftop's live inventory to flag aging units and fast/slow movers.">
   <meta property="og:url" content="https://apps.marketcheck.com/app/stocking-intelligence/">
   <meta property="og:image" content="https://apps.marketcheck.com/assets/screenshots/stocking-intelligence.png">
 
   <!-- Twitter -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="How to Build: Stocking Intelligence">
-  <meta name="twitter:description" content="Auction stocking guide powered by sold volume data. Shows which make/model combinations are selling fastest and at what prices in your state, broken down by body type segment.">
+  <meta name="twitter:description" content="Auction stocking advisor for used-car dealers. Scores up to 10 VINs with BUY/CAUTION/PASS verdicts, or loads a rooftop's live inventory to flag aging units and fast/slow movers.">
   <meta name="twitter:image" content="https://apps.marketcheck.com/assets/screenshots/stocking-intelligence.png">
 
   <!-- Structured Data -->
   <script type="application/ld+json">
-  {"@context":"https://schema.org","@type":"TechArticle","name":"How to Build: Stocking Intelligence","description":"Auction stocking guide powered by sold volume data. Shows which make/model combinations are selling fastest and at what prices in your state, broken down by body type segment.","url":"https://apps.marketcheck.com/app/stocking-intelligence/","image":"https://apps.marketcheck.com/assets/screenshots/stocking-intelligence.png","author":{"@type":"Organization","name":"MarketCheck","url":"https://www.marketcheck.com"}}
+  {"@context":"https://schema.org","@type":"TechArticle","name":"How to Build: Stocking Intelligence","description":"Auction stocking advisor for used-car dealers. Scores up to 10 VINs with BUY/CAUTION/PASS verdicts, or loads a rooftop's live inventory to flag aging units and fast/slow movers.","url":"https://apps.marketcheck.com/app/stocking-intelligence/","image":"https://apps.marketcheck.com/assets/screenshots/stocking-intelligence.png","author":{"@type":"Organization","name":"MarketCheck","url":"https://www.marketcheck.com"}}
   </script>
 
   <style>
@@ -309,12 +309,49 @@ pre.code-block {
   <!-- What This App Does -->
   <div class="section">
     <h2>What This App Does</h2>
-    <p>Auction stocking guide powered by sold volume data. Shows which make/model combinations are selling fastest and at what prices in your state, broken down by body type segment.</p>
+    <p>Auction stocking advisor for used-car dealers. Scores up to 10 VINs with BUY/CAUTION/PASS verdicts, or loads a rooftop's live inventory to flag aging units and fast/slow movers.</p>
   </div>
 
-  
+  <!-- Who Can Use This -->
+  <div class="section">
+    <h2>Who Can Use This</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Auction Buyer</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Paste the run-list VINs into the VIN Checker before you walk the lanes — each VIN comes back with predicted retail vs. wholesale price, expected margin, local supply count, and a BUY / CAUTION / PASS recommendation.</div>
+      </div><div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Used-Car Manager</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Look up your own rooftop or a competitor by dealer_id or domain. See total units, average price/miles/DOM, an inventory concentration heatmap, fast/slow movers from regional sold data, and a list of every unit sitting over 45 DOM.</div>
+      </div><div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;">
+        <div style="font-size:13px;font-weight:700;color:#0f172a;margin-bottom:6px;">Independent Dealer</div>
+        <div style="font-size:13px;color:#475569;line-height:1.5;">Run the VIN Checker on trade-ins or potential auction buys to sanity-check the retail-to-wholesale spread before writing the ticket.</div>
+      </div>
+    </div>
+  </div>
 
-  
+  <!-- URL Parameters -->
+  <div class="section">
+    <h2>URL Parameters</h2>
+    <p>Pass parameters directly in the URL to pre-fill the form and auto-generate the report:</p>
+    <table class="param-table">
+      <thead><tr><th>Parameter</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td><code>api_key</code></td><td>Your MarketCheck API key (Enterprise tier required for the Sold Summary API used in the dealer view)</td></tr><tr><td><code>vin</code></td><td>17-character VIN — pre-fills the VIN Checker textarea; auto-runs in live mode</td></tr><tr><td><code>zip</code></td><td>ZIP code used for local pricing and supply in the VIN Checker</td></tr><tr><td><code>dealer_id</code></td><td>MarketCheck dealer ID — auto-opens the By Dealer Stock tab and loads that dealer's inventory in live mode</td></tr><tr><td><code>embed</code></td><td>Set to any value to render in iframe-embed mode (hides the settings gear)</td></tr>
+      </tbody>
+    </table>
+    <h3>URL Examples</h3>
+    <pre class="code-block"># Basic — auto-generate a report for a VIN
+https://apps.marketcheck.com/apps/stocking-intelligence/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658
+
+# Full — with asking price, mileage, and ZIP for deal scoring
+https://apps.marketcheck.com/apps/stocking-intelligence/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;price=25000&amp;miles=35000&amp;zip=90044
+
+# Compact widget — for iframe embeds (400px width)
+https://apps.marketcheck.com/apps/stocking-intelligence/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;compact=true&amp;embed=true
+
+# Using aliases
+https://apps.marketcheck.com/apps/stocking-intelligence/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;askingPrice=25000&amp;mileage=35000&amp;zipcode=90044</pre>
+  </div>
 
   <!-- Screenshot -->
   <div class="section">

@@ -133,8 +133,34 @@ const APPS: AppDef[] = [
 
 // Apps that are tested and ready for live demo
 const READY_APPS = new Set([
+  // Consumer
   "vin-market-report", "trade-in-estimator", "used-car-market-index",
-  "car-search-app",
+  "car-search-app", "car-search-compare", "deal-evaluator",
+  "incentive-adjusted-deal-eval", "oem-incentives-explorer", "incentive-deal-finder",
+  // Dealer
+  "lot-pricing-dashboard", "stocking-intelligence", "pricing-transparency-report",
+  "dealer-inventory-fit-scorer", "dealer-conquest-analyzer", "deal-finder",
+  // Appraiser
+  "appraiser-workbench", "comparables-explorer",
+  // Dealership Group
+  "group-operations-center", "inventory-balancer", "dealer-group-scorecard",
+  // Lender
+  "underwriting-decision-support", "lender-portfolio-stress-test", "portfolio-risk-monitor",
+  // Analyst
+  "earnings-signal-dashboard", "watchlist-monitor",
+  // Cross-Segment
+  "ev-market-monitor", "vin-history-detective", "market-anomaly-detector",
+  // Auction House
+  "auction-lane-planner", "auction-arbitrage-finder",
+  "auction-run-list-analyzer", "consignment-sourcer", "auction-dealer-targeting",
+  // Lender Sales
+  "floor-plan-opportunity-scanner", "dealer-intelligence-brief", "subprime-opportunity-finder",
+  // UK
+  "uk-market-explorer", "uk-market-trends", "uk-dealer-pricing",
+  // Manufacturer (new builds)
+  "oem-depreciation-tracker", "ev-transition-monitor", "model-contenting-analyzer",
+  "market-momentum-report", "incentive-effectiveness-dashboard",
+  // Chat Demos
   "chat-vercel-ai", "chat-copilotkit", "chat-assistant-ui", "chat-sdk-bot",
   "chat-chainlit", "chat-streamlit", "chat-langchain",
 ]);
@@ -1563,6 +1589,7 @@ function render() {
   renderModes();
   renderAuthPanel();
   renderFooter();
+  renderCookieConsent();
 }
 
 let heroCanvas: HTMLCanvasElement | null = null;
@@ -2485,8 +2512,119 @@ function renderFooter() {
       <span class="footer-sep">|</span>
       <a href="https://github.com/MarketcheckHub/marketcheck-mcp-apps" target="_blank">GitHub</a>
     </div>
+    <div class="footer-text footer-legal">
+      &copy; ${new Date().getFullYear()} MarketCheck
+      <span class="footer-sep">|</span>
+      <a href="https://www.marketcheck.com/privacy_policy/" target="_blank" rel="noopener">Privacy Policy</a>
+      <span class="footer-sep">|</span>
+      <a href="https://www.marketcheck.com/terms_of_service/" target="_blank" rel="noopener">Terms of Service</a>
+      <span class="footer-sep">|</span>
+      <a href="https://www.marketcheck.com/cookie-policy/" target="_blank" rel="noopener">Cookie Policy</a>
+      <span class="footer-sep">|</span>
+      <a href="#" id="mc-cookie-settings">Cookie Settings</a>
+    </div>
   `;
   document.body.appendChild(footer);
+}
+
+// ── Cookie Consent (Google Consent Mode v2) ─────────────────────────────
+
+declare global {
+  interface Window {
+    dataLayer?: unknown[];
+  }
+}
+
+function gtagConsent(state: "granted" | "denied") {
+  window.dataLayer = window.dataLayer || [];
+  // eslint-disable-next-line prefer-rest-params
+  function gtag(..._args: unknown[]) { window.dataLayer!.push(arguments); }
+  gtag("consent", "update", {
+    ad_storage: state,
+    ad_user_data: state,
+    ad_personalization: state,
+    analytics_storage: state,
+  });
+}
+
+function renderCookieConsent() {
+  const STORAGE_KEY = "mc_cookie_consent";
+
+  const banner = document.createElement("div");
+  banner.id = "mc-cookie-banner";
+  banner.setAttribute("role", "dialog");
+  banner.setAttribute("aria-label", "Cookie consent");
+  banner.innerHTML = `
+    <div class="mc-cookie-inner">
+      <p class="mc-cookie-text">
+        We use cookies to run this site and, with your consent, analytics cookies to understand
+        how it's used. See our
+        <a href="https://www.marketcheck.com/cookie-policy/" target="_blank" rel="noopener">Cookie Policy</a>
+        and <a href="https://www.marketcheck.com/privacy_policy/" target="_blank" rel="noopener">Privacy Policy</a>.
+      </p>
+      <div class="mc-cookie-actions">
+        <button type="button" class="mc-cookie-btn mc-cookie-reject" id="mc-cookie-reject">Reject</button>
+        <button type="button" class="mc-cookie-btn mc-cookie-accept" id="mc-cookie-accept">Accept all</button>
+      </div>
+    </div>
+  `;
+
+  const style = document.createElement("style");
+  style.textContent = `
+    #mc-cookie-banner {
+      position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 9999;
+      max-width: 760px; margin: 0 auto;
+      background: var(--card-bg, #fff); color: var(--text, #1a1a1a);
+      border: 1px solid var(--border, #e2e8f0); border-radius: 14px;
+      box-shadow: 0 12px 48px rgba(0,0,0,0.22);
+      padding: 16px 18px; display: none;
+    }
+    #mc-cookie-banner.show { display: block; }
+    #mc-cookie-banner .mc-cookie-inner {
+      display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: space-between;
+    }
+    #mc-cookie-banner .mc-cookie-text {
+      margin: 0; font-size: 13px; line-height: 1.6; flex: 1 1 360px;
+    }
+    #mc-cookie-banner .mc-cookie-text a { color: var(--brand, #066aab); text-decoration: underline; }
+    #mc-cookie-banner .mc-cookie-actions { display: flex; gap: 10px; flex: 0 0 auto; }
+    #mc-cookie-banner .mc-cookie-btn {
+      font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+      padding: 9px 18px; border-radius: 8px; border: 1px solid var(--border, #e2e8f0);
+    }
+    #mc-cookie-banner .mc-cookie-reject { background: transparent; color: var(--text, #1a1a1a); }
+    #mc-cookie-banner .mc-cookie-accept { background: var(--brand, #066aab); color: #fff; border-color: var(--brand, #066aab); }
+    @media (max-width: 560px) {
+      #mc-cookie-banner .mc-cookie-actions { width: 100%; }
+      #mc-cookie-banner .mc-cookie-btn { flex: 1; }
+    }
+  `;
+  document.head.appendChild(style);
+  document.body.appendChild(banner);
+
+  const setChoice = (choice: "granted" | "denied") => {
+    try { localStorage.setItem(STORAGE_KEY, choice); } catch (e) { /* noop */ }
+    gtagConsent(choice);
+    banner.classList.remove("show");
+  };
+
+  banner.querySelector("#mc-cookie-accept")?.addEventListener("click", () => setChoice("granted"));
+  banner.querySelector("#mc-cookie-reject")?.addEventListener("click", () => setChoice("denied"));
+
+  const openBanner = () => banner.classList.add("show");
+
+  // Re-open from the footer "Cookie Settings" link
+  document.getElementById("mc-cookie-settings")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openBanner();
+  });
+
+  // Show only if no prior choice was recorded
+  let stored: string | null = null;
+  try { stored = localStorage.getItem(STORAGE_KEY); } catch (e) { /* noop */ }
+  if (stored !== "granted" && stored !== "denied") {
+    openBanner();
+  }
 }
 
 // ── Toast Notification ──────────────────────────────────────────────────

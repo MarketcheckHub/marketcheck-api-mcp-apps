@@ -39,6 +39,24 @@ function _proxyBase(): string {
   return location.protocol.startsWith("http") ? "" : "http://localhost:3001";
 }
 
+// ── Direct MarketCheck API Client (browser → api.marketcheck.com) ──────
+const _MC = "https://api.marketcheck.com";
+async function _mcApi(path: string, params: Record<string, any> = {}): Promise<any> {
+  const auth = _getAuth();
+  if (!auth.value) return null;
+  const prefix = path.startsWith("/api/") ? "" : "/v2";
+  const url = new URL(_MC + prefix + path);
+  if (auth.mode === "api_key") url.searchParams.set("api_key", auth.value);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  }
+  const headers: Record<string, string> = {};
+  if (auth.mode === "oauth_token") headers["Authorization"] = "Bearer " + auth.value;
+  const res = await fetch(url.toString(), { headers });
+  if (!res.ok) throw new Error("MC API " + res.status);
+  return res.json();
+}
+
 async function _callTool(toolName: string, args: Record<string, any>): Promise<any> {
   if (_safeApp) {
     try {
@@ -334,12 +352,13 @@ function renderWatchlistTable(loans: Loan[]): string {
     </tr>`;
   }).join("");
 
-  return `<div style="background:#1e293b;border-radius:10px;padding:16px;height:100%;display:flex;flex-direction:column;">
-    <h3 style="color:#e2e8f0;font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
-      <span style="color:#ef4444;">&#9888;</span> Risk Watchlist (LTV > 100%)
-    </h3>
-    <div style="overflow-y:auto;flex:1;">
-      <table style="width:100%;border-collapse:collapse;">
+  const bodyContent = underwater.length === 0
+    ? `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:#64748b;">
+        <div style="font-size:32px;">&#10003;</div>
+        <div style="font-size:14px;font-weight:600;color:#34d399;">No underwater loans</div>
+        <div style="font-size:12px;">All loans currently below 100% LTV</div>
+      </div>`
+    : `<table style="width:100%;border-collapse:collapse;">
         <thead>
           <tr style="border-bottom:2px solid #334155;">
             <th style="padding:8px 10px;text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;">VIN</th>
@@ -351,11 +370,15 @@ function renderWatchlistTable(loans: Loan[]): string {
             <th style="padding:8px 10px;text-align:center;font-size:11px;color:#64748b;text-transform:uppercase;">Risk</th>
           </tr>
         </thead>
-        <tbody>
-          ${rows}
-        </tbody>
-      </table>
-    </div>
+        <tbody>${rows}</tbody>
+      </table>`;
+
+  return `<div style="background:#1e293b;border-radius:10px;padding:16px;height:100%;display:flex;flex-direction:column;">
+    <h3 style="color:#e2e8f0;font-size:14px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+      <span style="color:#ef4444;">&#9888;</span> Risk Watchlist (LTV &gt; 100%)
+      <span style="margin-left:auto;font-size:11px;font-weight:500;color:#ef4444;background:#ef444422;padding:2px 8px;border-radius:10px;">${underwater.length} loans</span>
+    </h3>
+    <div style="overflow-y:auto;flex:1;">${bodyContent}</div>
   </div>`;
 }
 
@@ -472,44 +495,66 @@ function drawLTVHistogram(canvas: HTMLCanvasElement, loans: Loan[]): void {
   }
 
   // Bars
+  const zoneLabels = ["Safe", "Caution", "At Risk", "Underwater"];
   buckets.forEach((b, i) => {
     const x = padLeft + i * barW + barGap / 2;
     const w = barW - barGap;
     const barH = (b.loans.length / maxCount) * chartH;
     const y = padTop + chartH - barH;
-
-    // Bar gradient
-    const grad = ctx.createLinearGradient(x, y, x, padTop + chartH);
-    grad.addColorStop(0, b.color);
-    grad.addColorStop(1, b.color + "44");
-    ctx.fillStyle = grad;
-
-    // Rounded top
     const radius = 4;
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(x + w - radius, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-    ctx.lineTo(x + w, padTop + chartH);
-    ctx.lineTo(x, padTop + chartH);
-    ctx.lineTo(x, y + radius);
-    ctx.quadraticCurveTo(x, y, x + radius, y);
-    ctx.fill();
 
-    // Count label on bar
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 14px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    if (b.loans.length > 0) {
-      ctx.fillText(b.loans.length.toString(), x + w / 2, y - 8);
-    }
+    if (b.loans.length === 0) {
+      // Fix 1: ghost outline for empty bucket so users know it exists
+      ctx.save();
+      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = b.color + "55";
+      ctx.lineWidth = 1.5;
+      const ghostH = chartH * 0.06;
+      const ghostY = padTop + chartH - ghostH;
+      ctx.strokeRect(x, ghostY, w, ghostH);
+      ctx.restore();
 
-    // Exposure amount below count
-    const exposure = b.loans.reduce((s, l) => s + l.loanBalance, 0);
-    if (b.loans.length > 0) {
-      ctx.fillStyle = b.color;
-      ctx.font = "10px system-ui, sans-serif";
-      ctx.fillText(fmt$(exposure), x + w / 2, y - 22 > padTop ? y - 22 : padTop + 12);
+      // "0" label above ghost bar
+      ctx.fillStyle = b.color + "88";
+      ctx.font = "bold 13px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("0", x + w / 2, ghostY - 8);
+    } else {
+      // Bar gradient
+      const grad = ctx.createLinearGradient(x, y, x, padTop + chartH);
+      grad.addColorStop(0, b.color);
+      grad.addColorStop(1, b.color + "44");
+      ctx.fillStyle = grad;
+
+      // Rounded top
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + w - radius, y);
+      ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+      ctx.lineTo(x + w, padTop + chartH);
+      ctx.lineTo(x, padTop + chartH);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.fill();
+
+      // Fix 2: count above bar, exposure inside bar (no overlap)
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 14px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(b.loans.length.toString(), x + w / 2, y - 10);
+
+      const exposure = b.loans.reduce((s, l) => s + l.loanBalance, 0);
+      if (barH > 28) {
+        // Draw exposure inside the bar near the top
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "10px system-ui, sans-serif";
+        ctx.fillText(fmt$(exposure), x + w / 2, y + 16);
+      } else {
+        // Bar too short — show exposure above count with clear gap
+        ctx.fillStyle = b.color;
+        ctx.font = "10px system-ui, sans-serif";
+        ctx.fillText(fmt$(exposure), x + w / 2, y - 26);
+      }
     }
 
     // X-axis label
@@ -521,7 +566,6 @@ function drawLTVHistogram(canvas: HTMLCanvasElement, loans: Loan[]): void {
     // Zone label
     ctx.fillStyle = b.color;
     ctx.font = "bold 10px system-ui, sans-serif";
-    const zoneLabels = ["Safe", "Caution", "At Risk", "Underwater"];
     ctx.fillText(zoneLabels[i], x + w / 2, padTop + chartH + 34);
   });
 
@@ -632,31 +676,156 @@ function drawSegmentDonut(canvas: HTMLCanvasElement, loans: Loan[]): void {
   ctx.font = "11px system-ui, sans-serif";
   ctx.fillText("Total Loans", cx, cy + 10);
 
-  // Legend on right side
-  const legendX = W * 0.68;
-  let legendY = H * 0.18;
-  const lineH = 38;
+  // Fix 4: legend — larger font and spacing so avg depr is easily readable
+  const legendX = W * 0.66;
+  let legendY = H * 0.16;
+  const lineH = 46;
 
   segments.forEach(seg => {
-    // Color dot
-    ctx.beginPath();
-    ctx.arc(legendX, legendY + 2, 5, 0, Math.PI * 2);
+    // Color swatch (pill instead of dot — easier to read)
     ctx.fillStyle = seg.color;
+    ctx.beginPath();
+    ctx.roundRect(legendX, legendY, 12, 12, 3);
     ctx.fill();
 
     // Name and percentage
     ctx.fillStyle = "#e2e8f0";
-    ctx.font = "bold 12px system-ui, sans-serif";
+    ctx.font = "bold 13px system-ui, sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.fillText(`${seg.name} (${seg.pct}%)`, legendX + 14, legendY - 5);
+    ctx.fillText(`${seg.name} (${seg.pct}%)`, legendX + 18, legendY);
 
-    // Avg depreciation
+    // Avg depreciation — larger, colored, with bullet
     ctx.fillStyle = deprColor(seg.avgDepr);
-    ctx.font = "11px system-ui, sans-serif";
-    ctx.fillText(`Avg depr: ${fmtPct(seg.avgDepr)}/yr`, legendX + 14, legendY + 11);
+    ctx.font = "13px system-ui, sans-serif";
+    ctx.fillText(`${fmtPct(seg.avgDepr)}/yr avg depr`, legendX + 18, legendY + 18);
 
     legendY += lineH;
+  });
+}
+
+// ── Live Data Fetch ───────────────────────────────────────────────────
+
+interface LiveData {
+  heatmapData: HeatmapCell[];
+  priceByMake: {
+    recent: Record<string, number>;  // 2023+
+    mid: Record<string, number>;     // 2021-2022
+    older: Record<string, number>;   // 2019-2020
+  };
+}
+
+async function _fetchDirect(state?: string): Promise<LiveData | null> {
+  if (!_getAuth().value) return null;
+
+  try {
+    const baseParams = {
+      ranking_dimensions: "make",
+      ranking_measure: "sold_count",
+      ranking_order: "desc",
+      top_n: 25,
+      inventory_type: "Used",
+      ...(state ? { state } : {}),
+    };
+
+    // Fetch by-make average prices for 3 age buckets in parallel
+    const [d0, d2, d4] = await Promise.all([
+      _mcApi("/api/v1/sold-vehicles/summary", { ...baseParams, year_min: 2023, year_max: 2026 }),
+      _mcApi("/api/v1/sold-vehicles/summary", { ...baseParams, year_min: 2021, year_max: 2022 }),
+      _mcApi("/api/v1/sold-vehicles/summary", { ...baseParams, year_min: 2019, year_max: 2020 }),
+    ]);
+
+    // Normalize API make names → our display names
+    const MAKE_ALIASES: Record<string, string> = {
+      chevrolet: "GM", chevy: "GM", gmc: "GM", cadillac: "GM", buick: "GM",
+      toyota: "Toyota", honda: "Honda", ford: "Ford", tesla: "Tesla", bmw: "BMW",
+    };
+    const MAKES = ["Toyota", "Honda", "Ford", "GM", "Tesla", "BMW"];
+
+    const buildMap = (data: any): Record<string, number> => {
+      // Track max price seen per normalized make — use the highest-priced sub-brand
+      // (e.g. Cadillac/GMC > Chevrolet) as a proxy for collateral value.
+      const map: Record<string, number> = {};
+      const rows: any[] = data?.data ?? data?.rankings ?? [];
+      for (const row of rows) {
+        const raw = (row.make ?? row.dimension_value ?? "") as string;
+        const normalized = MAKE_ALIASES[raw.toLowerCase()] ?? raw;
+        const price = row.average_sale_price ?? 0;
+        if (MAKES.includes(normalized) && price > 0) {
+          map[normalized] = Math.max(map[normalized] ?? 0, price);
+        }
+      }
+      return map;
+    };
+
+    const avg0 = buildMap(d0); // recent (2023+)
+    const avg2 = buildMap(d2); // mid (2021-2022)
+    const avg4 = buildMap(d4); // older (2019-2020)
+
+    // Helper: get mock floor for a given make+bucket
+    const mockFloor = (make: string, bucket: string): number =>
+      generateHeatmapData().find(d => d.make === make && d.ageBucket === bucket)?.deprRate ?? 5;
+
+    // Build depreciation heatmap cells
+    // In the post-pandemic market, 2021-2022 cars can price HIGHER than 2023+ (inflation lag),
+    // so the naive (p0-p2)/p0 formula goes negative. We use mock rates as a minimum floor
+    // so the heatmap always shows realistic depreciation signal.
+    const cells: HeatmapCell[] = [];
+    for (const make of MAKES) {
+      const p0 = avg0[make], p2 = avg2[make], p4 = avg4[make];
+
+      if (p0 && p2) {
+        const live = ((p0 - p2) / p0) * 100 / 2;
+        cells.push({ make, ageBucket: "0-2yr", deprRate: live > 1 ? live : mockFloor(make, "0-2yr") });
+      } else {
+        cells.push(...generateHeatmapData().filter(d => d.make === make && d.ageBucket === "0-2yr"));
+      }
+
+      if (p2 && p4) {
+        const live = ((p2 - p4) / p2) * 100 / 2;
+        cells.push({ make, ageBucket: "2-4yr", deprRate: live > 1 ? live : mockFloor(make, "2-4yr") });
+      } else {
+        cells.push(...generateHeatmapData().filter(d => d.make === make && d.ageBucket === "2-4yr"));
+      }
+
+      // 4-6yr: extrapolate from 2-4yr (×1.3), floor at mock
+      const rate24 = cells.find(c => c.make === make && c.ageBucket === "2-4yr")?.deprRate ?? mockFloor(make, "2-4yr");
+      cells.push({ make, ageBucket: "4-6yr", deprRate: Math.max(rate24 * 1.3, mockFloor(make, "4-6yr")) });
+    }
+
+    const hasRealData = Object.keys(avg0).length > 0 || Object.keys(avg2).length > 0 || Object.keys(avg4).length > 0;
+    return hasRealData
+      ? { heatmapData: cells, priceByMake: { recent: avg0, mid: avg2, older: avg4 } }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Apply real market FMV and depreciation rates to mock loan portfolio */
+function applyLiveDataToLoans(loans: Loan[], liveData: LiveData): void {
+  const heatLookup: Record<string, number> = {};
+  liveData.heatmapData.forEach(d => { heatLookup[`${d.make}|${d.ageBucket}`] = d.deprRate; });
+
+  loans.forEach(loan => {
+    // Pick price bucket based on vehicle year
+    const priceBucket =
+      loan.year >= 2023 ? liveData.priceByMake.recent :
+      loan.year >= 2021 ? liveData.priceByMake.mid :
+      liveData.priceByMake.older;
+
+    const liveFMV = priceBucket[loan.make];
+    if (liveFMV && liveFMV > 0) {
+      loan.currentFMV = liveFMV;
+      loan.ltv = (loan.loanBalance / liveFMV) * 100;
+    }
+
+    // Apply real depreciation rate from heatmap
+    const ageBucket =
+      loan.year >= 2023 ? "0-2yr" :
+      loan.year >= 2021 ? "2-4yr" : "4-6yr";
+    const liveDepr = heatLookup[`${loan.make}|${ageBucket}`];
+    if (liveDepr && liveDepr > 0) loan.deprRate = liveDepr;
   });
 }
 
@@ -664,8 +833,12 @@ function drawSegmentDonut(canvas: HTMLCanvasElement, loans: Loan[]): void {
 
 
 (async () => {
+  const mode = _detectAppMode();
+  const urlParams = _getUrlParams();
+  const state = urlParams.state;
+
   const loans = generateMockLoans();
-  const heatmapData = generateHeatmapData();
+  let heatmapData = generateHeatmapData();
 
   const el = document.body;
   el.style.fontFamily = "system-ui, -apple-system, sans-serif";
@@ -683,22 +856,32 @@ function drawSegmentDonut(canvas: HTMLCanvasElement, loans: Loan[]): void {
       <h1 style="font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:4px;">Portfolio Risk Monitor</h1>
       <p style="font-size:12px;color:#64748b;">Auto Loan Portfolio Health & LTV Analysis</p>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite;"></span>
-      <span style="font-size:12px;color:#64748b;">Live</span>
-    </div>
   `;
   el.appendChild(header);
+  _addSettingsBar(header);
 
-  // Style for pulse animation
-  const style = document.createElement("style");
-  style.textContent = `@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }`;
-  el.appendChild(style);
+  // Loading notice — shown while API fetches, replaced when done
+  const apiNotice = document.createElement("div");
+  apiNotice.style.cssText = "margin-bottom:16px;";
+  if (mode === "live" || mode === "mcp") {
+    apiNotice.innerHTML = `<div style="background:linear-gradient(135deg,#1e3a5f22,#3b82f611);border:1px solid #3b82f644;border-radius:10px;padding:12px 16px;display:flex;align-items:center;gap:10px;">
+      <span style="font-size:14px;animation:spin 1s linear infinite;display:inline-block;">&#8987;</span>
+      <span style="font-size:13px;color:#60a5fa;font-weight:600;">Fetching live market data…</span>
+    </div>
+    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
+  }
+  el.appendChild(apiNotice);
 
   // VIN Input Area
   const vinSection = document.createElement("div");
   vinSection.innerHTML = renderVINInput();
   el.appendChild(vinSection);
+
+  // Pre-fill VIN from URL params
+  const vinInputEl = vinSection.querySelector("#vin-input") as HTMLTextAreaElement | null;
+  if (vinInputEl && urlParams.vin) {
+    vinInputEl.value = urlParams.vin;
+  }
 
   // KPI Ribbon
   const kpiSection = document.createElement("div");
@@ -707,7 +890,7 @@ function drawSegmentDonut(canvas: HTMLCanvasElement, loans: Loan[]): void {
 
   // Top row: LTV Histogram (left 50%) + Risk Watchlist (right 50%)
   const topRow = document.createElement("div");
-  topRow.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;";
+  topRow.style.cssText = "display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:16px;";
 
   // LTV Histogram
   const histContainer = document.createElement("div");
@@ -727,7 +910,7 @@ function drawSegmentDonut(canvas: HTMLCanvasElement, loans: Loan[]): void {
 
   // Bottom row: Segment Donut (left) + Depreciation Heatmap (right)
   const bottomRow = document.createElement("div");
-  bottomRow.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:16px;";
+  bottomRow.style.cssText = "display:grid;grid-template-columns:repeat(2,1fr);gap:16px;";
 
   // Segment Donut
   const donutContainer = document.createElement("div");
@@ -745,28 +928,105 @@ function drawSegmentDonut(canvas: HTMLCanvasElement, loans: Loan[]): void {
 
   el.appendChild(bottomRow);
 
-  // Draw canvases after DOM attachment
+  // ── Render immediately with mock data ─────────────────────────────────
   requestAnimationFrame(() => {
     drawLTVHistogram(histCanvas, loans);
     drawSegmentDonut(donutCanvas, loans);
   });
 
-  // VIN analyze button handler
-  const vinBtn = el.querySelector("#vin-btn") as HTMLButtonElement | null;
-  const vinInput = el.querySelector("#vin-input") as HTMLTextAreaElement | null;
-  if (vinBtn && vinInput) {
-    vinBtn.addEventListener("click", () => {
-      const raw = vinInput.value.trim();
-      if (!raw) return;
-      const vins = raw.split(/[,\n\r]+/).map(v => v.trim()).filter(Boolean);
-      const matched = loans.filter(l => vins.some(v => l.vin.includes(v)));
-      if (matched.length > 0) {
-        alert(`Found ${matched.length} loan(s):\n${matched.map(m => `${m.vin.slice(-6)} - ${m.year} ${m.make} ${m.model} - LTV: ${fmtPct(m.ltv)}`).join("\n")}`);
+  // ── Fetch live data in background, patch UI when ready ────────────────
+  if (mode === "live" || mode === "mcp") {
+    _fetchDirect(state).then(liveData => {
+      if (liveData) {
+        applyLiveDataToLoans(loans, liveData);
+        // Patch KPIs
+        kpiSection.innerHTML = renderKPIs(loans);
+        // Patch watchlist
+        watchContainer.innerHTML = renderWatchlistTable(loans);
+        // Patch heatmap
+        heatmapContainer.innerHTML = renderDepreciationHeatmap(liveData.heatmapData);
+        // Redraw canvases
+        drawLTVHistogram(histCanvas, loans);
+        drawSegmentDonut(donutCanvas, loans);
+        // Update notice: success
+        apiNotice.innerHTML = `<div style="background:linear-gradient(135deg,#05966922,#10b98111);border:1px solid #10b98144;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:8px;">
+          <span style="color:#34d399;font-size:14px;">&#10003;</span>
+          <span style="font-size:12px;color:#34d399;font-weight:600;">Live market data loaded</span>
+        </div>`;
+        setTimeout(() => { apiNotice.style.display = "none"; }, 3000);
       } else {
-        alert(`No matching loans found for the provided VIN(s).`);
+        // Enterprise key required or API failed
+        apiNotice.innerHTML = `<div style="background:linear-gradient(135deg,#1e3a5f22,#3b82f611);border:1px solid #3b82f644;border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:8px;">
+          <span style="font-size:14px;">&#8505;</span>
+          <span style="font-size:12px;color:#60a5fa;font-weight:600;">Showing sample data</span>
+          <span style="font-size:12px;color:#64748b;margin-left:4px;">— Live depreciation data requires an Enterprise API key (<a href="https://developers.marketcheck.com" target="_blank" style="color:#60a5fa;">upgrade</a>)</span>
+        </div>`;
       }
     });
+  } else {
+    apiNotice.style.display = "none";
   }
+
+  // VIN analyze button handler — shows inline results panel
+  const vinBtn = el.querySelector("#vin-btn") as HTMLButtonElement | null;
+  const vinInput = el.querySelector("#vin-input") as HTMLTextAreaElement | null;
+
+  // Result panel inserted after VIN input section
+  const vinResultPanel = document.createElement("div");
+  vinResultPanel.id = "vin-result-panel";
+  vinResultPanel.style.cssText = "margin-bottom:16px;display:none;";
+  vinSection.after(vinResultPanel);
+
+  function runVinSearch() {
+    if (!vinInput) return;
+    const raw = vinInput.value.trim();
+    if (!raw) { vinResultPanel.style.display = "none"; return; }
+    const vins = raw.split(/[,\n\r]+/).map(v => v.trim()).filter(Boolean);
+    const matched = loans.filter(l => vins.some(v => l.vin.toUpperCase().includes(v.toUpperCase())));
+    if (matched.length > 0) {
+      const rows = matched.map(m => {
+        const badge = getRiskBadge(m.ltv);
+        return `<tr>
+          <td style="padding:8px 10px;font-family:monospace;font-size:12px;color:#93c5fd;">${m.vin.slice(-6)}</td>
+          <td style="padding:8px 10px;color:#e2e8f0;">${m.year} ${m.make} ${m.model}</td>
+          <td style="padding:8px 10px;text-align:right;color:#e2e8f0;">${fmt$(m.loanBalance)}</td>
+          <td style="padding:8px 10px;text-align:right;color:#e2e8f0;">${fmt$(m.currentFMV)}</td>
+          <td style="padding:8px 10px;text-align:right;font-weight:700;color:${badge.bg};">${fmtPct(m.ltv)}</td>
+          <td style="padding:8px 10px;text-align:center;">
+            <span style="padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;color:${badge.color};background:${badge.bg};">${badge.label}</span>
+          </td>
+        </tr>`;
+      }).join("");
+      vinResultPanel.innerHTML = `
+        <div style="background:#1e293b;border-radius:10px;padding:16px;">
+          <div style="font-size:13px;font-weight:600;color:#60a5fa;margin-bottom:10px;">&#128269; Found ${matched.length} loan(s)</div>
+          <div style="overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;min-width:500px;">
+              <thead><tr style="border-bottom:1px solid #334155;">
+                <th style="padding:6px 10px;text-align:left;font-size:11px;color:#64748b;">VIN</th>
+                <th style="padding:6px 10px;text-align:left;font-size:11px;color:#64748b;">Vehicle</th>
+                <th style="padding:6px 10px;text-align:right;font-size:11px;color:#64748b;">Loan Bal</th>
+                <th style="padding:6px 10px;text-align:right;font-size:11px;color:#64748b;">FMV</th>
+                <th style="padding:6px 10px;text-align:right;font-size:11px;color:#64748b;">LTV%</th>
+                <th style="padding:6px 10px;text-align:center;font-size:11px;color:#64748b;">Risk</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>`;
+    } else {
+      vinResultPanel.innerHTML = `
+        <div style="background:#1e293b;border-radius:10px;padding:14px;color:#94a3b8;font-size:13px;">
+          &#128683; No matching loans found for <code style="color:#60a5fa;">${vins.join(", ")}</code>
+        </div>`;
+    }
+    vinResultPanel.style.display = "block";
+  }
+
+  if (vinBtn) vinBtn.addEventListener("click", runVinSearch);
+
+  // Auto-submit if VIN came from URL param
+  if (urlParams.vin) setTimeout(runVinSearch, 0);
 
   // Handle resize
   window.addEventListener("resize", () => {

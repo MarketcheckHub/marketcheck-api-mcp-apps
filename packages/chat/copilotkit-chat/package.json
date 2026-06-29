@@ -8,8 +8,8 @@
     "start": "next start -p 3011"
   },
   "dependencies": {
-    "@copilotkit/react-core": "^1.0.0",
-    "@copilotkit/react-ui": "^1.0.0",
+    "@copilotkit/react-core": "^1.61.2",
+    "@copilotkit/react-ui": "^1.61.2",
     "@copilotkit/runtime": "^1.0.0",
     "next": "^15.0.0",
     "react": "^19.0.0",

@@ -185,6 +185,33 @@ const API_ENDPOINTS = {
     ],
     returns: "num_found, listings[], stats{}",
   },
+  dealerInfo: {
+    method: "GET",
+    path: "/v2/dealer/car/{id}",
+    name: "Dealer Profile Lookup",
+    description: "Returns the public profile for a MarketCheck dealer ID — seller name, dealership group, address, latitude/longitude, and current listing count. Used to resolve dealer IDs to human-readable rooftop names.",
+    docUrl: "https://apidocs.marketcheck.com/",
+    params: [
+      { name: "id", type: "string", required: true, desc: "MarketCheck dealer ID (path parameter)" },
+    ],
+    returns: "id, seller_name, dealership_group_name, street, city, state, zip, listing_count, dealer_type",
+  },
+  dealerInventoryActive: {
+    method: "GET",
+    path: "/v2/car/dealer/inventory/active",
+    name: "Dealer Inventory (Active)",
+    description: "Returns the active listings for a specific dealer ID with full per-VIN detail (price, miles, DOM, build, dealer). Unlike the generic /search/car/active endpoint, this one returns the listings array when scoped by dealer_id — making it the right call for per-rooftop inventory drill-downs and high-DOM transfer candidates.",
+    docUrl: "https://apidocs.marketcheck.com/",
+    params: [
+      { name: "dealer_id", type: "string", required: true, desc: "MarketCheck dealer ID" },
+      { name: "rows", type: "number", required: false, desc: "Number of listings (default 10, max 50)" },
+      { name: "sort_by", type: "string", required: false, desc: "Sort field: dom, price, miles, last_seen_at" },
+      { name: "sort_order", type: "string", required: false, desc: "asc or desc" },
+      { name: "stats", type: "string", required: false, desc: "Aggregate stats: price,miles,dom" },
+      { name: "facets", type: "string", required: false, desc: "Facet fields: body_type,make,model" },
+    ],
+    returns: "num_found, listings[] with vin, price, miles, dom, build{}, dealer{}, plus optional facets{} and stats{}",
+  },
 };
 
 // ── App Definitions ─────────────────────────────────────────────────────
@@ -237,15 +264,38 @@ const APPS = [
     tagline: "Find and compare cars side by side",
     segment: "Consumer",
     toolName: "compare-cars",
-    description: "Side-by-side comparison of multiple vehicles. For each VIN, decodes specs and predicts price, then renders a comparison table highlighting differences in price, features, and market position.",
+    description: "A full-featured vehicle search and side-by-side comparison tool. Browse dealer inventory using structured filters (make, body type, fuel type, price, year, mileage, ZIP radius) then select up to 3 vehicles for a detailed comparison table. The comparison view highlights the best value, shows price vs. predicted market price, and diffs specs like engine, drivetrain, MPG, days on market, and dealer location. Includes dark mode, market stats sidebar with price/mileage distributions, body-type breakdown, and deal/CPO/low-miles badges on search cards.",
+    useCases: [
+      { persona: "Car Shoppers", desc: "Search inventory by make, price, and location, then compare your top 2-3 picks side by side to see which is the best deal." },
+      { persona: "Dealers", desc: "Embed as a comparison widget on your website so customers can shortlist and compare vehicles from your lot." },
+      { persona: "Fleet Buyers", desc: "Compare specs, pricing, and mileage across multiple similar vehicles to find the best value for fleet purchases." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — enables live data mode" },
+      { name: "make", desc: "Pre-select makes, comma-separated (e.g., Toyota,Honda)" },
+      { name: "body_type", desc: "Filter by body type (e.g., SUV, Sedan)" },
+      { name: "fuel_type", desc: "Filter by fuel type (e.g., Electric, Hybrid)" },
+      { name: "zip", desc: "Center ZIP for radius search (e.g., 90210)" },
+      { name: "radius", desc: "Search radius in miles (e.g., 50)" },
+      { name: "price_min", desc: "Minimum price filter" },
+      { name: "price_max", desc: "Maximum price filter" },
+      { name: "year_min", desc: "Minimum year filter" },
+      { name: "year_max", desc: "Maximum year filter" },
+      { name: "miles_max", desc: "Maximum mileage filter" },
+      { name: "sort_by", desc: "Sort: price_asc, price_desc, miles_asc, year_desc" },
+    ],
     inputParams: [
-      { name: "vins", type: "array", required: true, desc: "Array of VINs to compare" },
-      { name: "zip", type: "string", required: false, desc: "ZIP code for local pricing" },
+      { name: "make", type: "string", required: false, desc: "Vehicle make (e.g., Toyota)" },
+      { name: "body_type", type: "string", required: false, desc: "Body type: sedan, suv, truck, etc." },
+      { name: "fuel_type", type: "string", required: false, desc: "Fuel type: Gas, Electric, Hybrid" },
+      { name: "zip", type: "string", required: false, desc: "ZIP code for local search" },
+      { name: "radius", type: "number", required: false, desc: "Search radius in miles" },
+      { name: "rows", type: "number", required: false, desc: "Number of results" },
     ],
     apiFlow: [
-      { step: 1, label: "For each VIN in parallel", apis: ["decode", "predictRetail"], parallel: true, note: "Decode + predict price for every VIN simultaneously" },
+      { step: 1, label: "Search Active Inventory", apis: ["searchActive"], parallel: false, note: "Search with filters + stats + facets + dealer object + photos" },
     ],
-    renders: "Side-by-side spec comparison table, price position indicators, feature diff highlighting",
+    renders: "SERP card grid with photo placeholders and deal badges, side-by-side comparison table (up to 3 vehicles) with best-value highlight, market stats sidebar with price/mileage distributions, body type breakdown bars, comparison tray with thumbnails",
   },
   {
     id: "car-search-app",
@@ -253,7 +303,26 @@ const APPS = [
     tagline: "Full search with SERP, vehicle details, and natural language search",
     segment: "Consumer",
     toolName: "search-cars",
-    description: "Full-featured car search with SERP-style results, vehicle detail pages, filter chips, and deal badges. Supports keyword/natural language search alongside structured filters.",
+    description: "A full-featured car search engine with SERP-style results, vehicle detail pages, photo carousels, filter chips, deal badges, and natural language search. Users can browse inventory using structured filters (make, model, year, price, mileage, body type, drivetrain, color, ZIP radius) or type plain-English queries like 'red Toyota SUV under $35,000 near Denver'. Includes dark mode, mobile-responsive drawer filters, comparable vehicles on detail pages, price analysis with predicted value, and share/deep-link support.",
+    useCases: [
+      { persona: "Car Shoppers", desc: "Search dealer inventory by make, model, price, and location — or describe what you want in plain English and let the NLP parser find matches." },
+      { persona: "Dealers", desc: "Embed as a search widget on your website to let customers browse your inventory with rich filtering, photo galleries, and deal badges." },
+      { persona: "Market Researchers", desc: "Explore active listings across the US to compare pricing, mileage, and days-on-market across makes and body types." },
+      { persona: "Auto Journalists", desc: "Quickly find and compare vehicles for editorial content — filter by EV, truck, luxury, or any segment." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — enables live data mode" },
+      { name: "make", desc: "Pre-select a make (e.g., Toyota) and auto-search" },
+      { name: "model", desc: "Pre-select a model (e.g., Camry)" },
+      { name: "zip", desc: "Center ZIP for radius search (e.g., 90210)" },
+      { name: "radius", desc: "Search radius in miles (e.g., 50)" },
+      { name: "body_type", desc: "Filter by body type (e.g., SUV, Truck)" },
+      { name: "fuel_type", desc: "Filter by fuel type (e.g., Electric, Hybrid)" },
+      { name: "price_range", desc: "Price range as min-max (e.g., 20000-40000)" },
+      { name: "miles_range", desc: "Max mileage as 0-max (e.g., 0-50000)" },
+      { name: "year", desc: "Year or range (e.g., 2022-2025)" },
+      { name: "sort_by", desc: "Sort option: price_asc, price_desc, miles_asc, dom_asc, deal" },
+    ],
     inputParams: [
       { name: "make", type: "string", required: false, desc: "Vehicle make (e.g., Toyota)" },
       { name: "model", type: "string", required: false, desc: "Vehicle model (e.g., Camry)" },
@@ -276,7 +345,20 @@ const APPS = [
     tagline: "Should I buy this car? Get a Buy/Negotiate/Pass verdict",
     segment: "Consumer",
     toolName: "evaluate-deal",
-    description: "Evaluates whether a car deal is good by combining VIN decode, price prediction, comparable active listings, and listing history. Produces a Buy/Negotiate/Pass verdict with gauge visualization, price percentile ranking, and negotiation leverage points.",
+    description: "Paste a VIN to get a data-backed verdict on whether a specific car is a good buy. Combines VIN decode, ML-based fair-price prediction, live comparable listings within 75 miles, and the vehicle's own listing history to produce a color-coded Buy/Negotiate/Pass gauge. Quantifies where the asking price sits in the local market distribution (percentile rank), surfaces the fair market value, generates a suggested opening offer (5% below FMV), and lists concrete negotiation leverage points derived from days-on-market, price drops, local inventory depth, and mileage position.",
+    useCases: [
+      { persona: "Car Shoppers", desc: "Paste a VIN before stepping onto the lot to know if the sticker is fair, overpriced, or a steal — and walk in with a suggested offer and specific talking points." },
+      { persona: "Auto Journalists", desc: "Quickly validate pricing claims for vehicles in reviews or listicles against real local market data." },
+      { persona: "Fleet Buyers", desc: "Evaluate multiple candidate vehicles against local market conditions before committing to a purchase." },
+      { persona: "Dealers", desc: "Cross-check asking prices on trade-ins and acquisitions against the same market signals a well-informed buyer would see." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — triggers live mode when present" },
+      { name: "vin", desc: "17-character VIN — pre-fills the form and auto-runs the evaluation" },
+      { name: "askingPrice", desc: "Dealer's asking price in USD (number) — used for percentile + gauge positioning" },
+      { name: "miles", desc: "Current mileage (number) — used to compare against market-average miles" },
+      { name: "zip", desc: "Buyer's ZIP code — narrows the comparable search to local inventory" },
+    ],
     inputParams: [
       { name: "vin", type: "string", required: true, desc: "17-character VIN" },
       { name: "askingPrice", type: "number", required: false, desc: "Dealer asking price" },
@@ -296,18 +378,31 @@ const APPS = [
     tagline: "True out-of-pocket cost after rebates and APR savings",
     segment: "Consumer",
     toolName: "evaluate-incentive-deal",
-    description: "Extends the deal evaluator by also pulling OEM incentives. Shows the true out-of-pocket cost after cash back, APR specials, and lease deals — giving a more accurate deal evaluation.",
+    description: "Goes beyond a simple deal evaluation by factoring in manufacturer incentives — cash back, low-APR financing, and lease specials — to reveal the true out-of-pocket cost of a new car. Decodes the VIN, predicts market fair value, fetches the full OEM incentive program for the make and model, and then models multiple buy paths (cash-back + standard financing vs incentive APR vs lease) to recommend the cheapest route. Output includes a stacked savings breakdown (cash back + dealer discount + APR interest savings + vs-FMV), a full 4-rate × 4-term financing comparison table, an eligibility checklist so shoppers know which incentives require credit approval or trade-in proof, and negotiation tips grounded in the live comp set.",
+    useCases: [
+      { persona: "New-Car Shoppers", desc: "Paste a VIN and asking price to see the true drive-away cost after every rebate and APR incentive stacks. The recommender picks between cash back vs incentive APR based on 60-month total cost." },
+      { persona: "Negotiators", desc: "Use the live comp table and incentive expiration dates as month-end leverage. Each tip is derived from the specific deal, not generic advice." },
+      { persona: "Credit Unions & Pre-Approved Buyers", desc: "Compare the manufacturer's incentive APR against your own pre-approval across 36/48/60/72-month terms — the tool shows exactly when your outside rate beats the captive offer." },
+      { persona: "Dealership Finance Teams", desc: "Run a quick parity check on a customer's expected out-of-pocket before presenting numbers. Useful for validating incentive eligibility and stacking rules at the desk." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage / settings gear)" },
+      { name: "vin", desc: "17-character VIN — auto-fills the form and triggers evaluation on load" },
+      { name: "zip", desc: "Buyer's ZIP code — used to scope active comparables (incentives are MSA/state-level)" },
+      { name: "askingPrice", desc: "Dealer's asking price in USD — drives out-of-pocket and buy-path math" },
+      { name: "miles", desc: "Current odometer reading — required by /predict for accurate ML fair-value" },
+    ],
     inputParams: [
       { name: "vin", type: "string", required: true, desc: "17-character VIN" },
       { name: "askingPrice", type: "number", required: false, desc: "Dealer asking price" },
-      { name: "miles", type: "number", required: false, desc: "Current mileage" },
-      { name: "zip", type: "string", required: false, desc: "Buyer's ZIP code" },
+      { name: "miles", type: "number", required: false, desc: "Current mileage (required by /predict for accurate fair-value)" },
+      { name: "zip", type: "string", required: false, desc: "Buyer's ZIP code for local comparables" },
     ],
     apiFlow: [
       { step: 1, label: "Decode VIN", apis: ["decode"], parallel: false, note: "Get year/make/model for incentive and comp searches" },
-      { step: 2, label: "Price + Incentives + Comps", apis: ["predictRetail", "incentives", "searchActive"], parallel: true, note: "Predict price, fetch OEM incentives for make, and search comps — all in parallel" },
+      { step: 2, label: "Price + Incentives + Comps", apis: ["predictRetail", "incentives", "searchActive"], parallel: true, note: "Predict price (with miles), fetch OEM incentives for make (ZIP is stripped — data is MSA-level), and search comps — all in parallel" },
     ],
-    renders: "Sticker price vs out-of-pocket waterfall chart, incentive badges, deal gauge (adjusted for incentives), cash back / APR / lease cards, comp vehicle list",
+    renders: "Sticker price vs out-of-pocket waterfall chart, incentive badges, deal gauge (adjusted for incentives), cash back / APR / lease cards, comp vehicle list, financing scenario matrix, eligibility checklist, negotiation tips",
   },
   {
     id: "trade-in-estimator",
@@ -315,7 +410,21 @@ const APPS = [
     tagline: "What's your car worth? 3-tier instant valuation",
     segment: "Consumer",
     toolName: "estimate-trade-in",
-    description: "Produces a 3-tier valuation — private party, dealer trade-in, and instant cash offer — using retail and wholesale price predictions plus recently sold comparable vehicles.",
+    description: "The Trade-In Estimator gives car owners an instant, data-backed answer to 'What's my car worth?' by producing three distinct valuations: Private Party Value (what you'd get selling directly to a buyer), Dealer Trade-In Value (what a dealership would offer), and Instant Cash Offer Range (quick-sale offers from dealers and services like CarMax or Carvana). Each tier adjusts dynamically based on vehicle condition (excellent, good, fair, poor). The tool decodes the VIN for exact specs, runs dual ML price predictions (franchise and independent dealer models), and pulls recently sold comparable vehicles as market evidence. Results include interactive range bars, a sold comps evidence table with comp count, date range and geographic scope, and actionable tips to maximize selling price.",
+    useCases: [
+      { persona: "Car Owners", desc: "Enter your VIN, mileage, and ZIP to instantly see what your car is worth across three selling channels — private sale, dealer trade-in, or instant cash offer." },
+      { persona: "Dealers (Appraisal Desk)", desc: "Use as a quick appraisal reference — see wholesale vs retail spreads and recent sold comps to make competitive trade-in offers." },
+      { persona: "Auto Lenders", desc: "Validate collateral value for loan origination or refinancing — the 3-tier breakdown shows retail exposure, wholesale floor, and quick-liquidation value." },
+      { persona: "Car Shoppers", desc: "Know your trade-in value before visiting the dealer — use private party value as your negotiation ceiling and instant cash range as your floor." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "vin", desc: "17-character VIN — auto-fills the form" },
+      { name: "miles", desc: "Current mileage" },
+      { name: "zip", desc: "Owner's ZIP code for local market comparables" },
+      { name: "condition", desc: "Vehicle condition: excellent, good, fair, or poor" },
+      { name: "embed", desc: "Set to 'true' for embedded mode (hides settings gear)" },
+    ],
     inputParams: [
       { name: "vin", type: "string", required: true, desc: "17-character VIN" },
       { name: "miles", type: "number", required: false, desc: "Current mileage" },
@@ -323,11 +432,11 @@ const APPS = [
       { name: "condition", type: "string", required: false, desc: "Vehicle condition: excellent, good, fair, poor" },
     ],
     apiFlow: [
-      { step: 1, label: "Decode VIN", apis: ["decode"], parallel: false, note: "Get year/make/model for comp search" },
-      { step: 2, label: "Retail + Wholesale Price", apis: ["predictRetail", "predictWholesale"], parallel: true, note: "Get both franchise (retail) and independent (wholesale) predictions in parallel" },
-      { step: 3, label: "Sold Comparables", apis: ["searchRecents"], parallel: false, note: "Search recently sold similar vehicles for market evidence" },
+      { step: 1, label: "Decode VIN", apis: ["decode"], parallel: false, note: "Get year/make/model/trim/engine for comp search and display" },
+      { step: 2, label: "Retail + Wholesale Price", apis: ["predictRetail", "predictWholesale"], parallel: true, note: "Get both franchise (retail) and independent (wholesale) ML predictions in parallel — retail drives private party value, wholesale informs trade-in floor" },
+      { step: 3, label: "Sold Comparables", apis: ["searchRecents"], parallel: false, note: "Search recently sold similar vehicles (year +/-1, 100mi radius) for market evidence and pricing validation" },
     ],
-    renders: "3-tier value gauge (private party / trade-in / cash), range bars, sold comparable evidence table, condition adjustment factors",
+    renders: "3-tier value cards (private party / trade-in / instant cash) with range bars and marker dots, condition selector pills that recalculate all values instantly, vehicle specs grid decoded from VIN, expandable 'How We Got This Number' section with comp count/date range/geo scope and sold comps table, 'Maximize Your Value' tips section",
   },
   {
     id: "used-car-market-index",
@@ -351,18 +460,32 @@ const APPS = [
     tagline: "Cash back, APR, and lease deals by ZIP",
     segment: "Consumer",
     toolName: "oem-incentives-explorer",
-    description: "Browse and compare OEM incentive programs across brands. Shows cash back, APR specials, and lease deals with amounts, terms, and expiration dates. Supports multi-brand comparison.",
+    description: "A dark-themed dashboard for browsing and comparing OEM incentive programs across major brands. Pick a make (and optionally a model and ZIP), then see all active manufacturer offers — cash back, low-APR financing, lease specials, loyalty cash, and conquest bonuses — as color-coded cards with amounts, eligible models, expiration countdowns, and fine print. Add up to two competing brands for a side-by-side comparison table that highlights the best deal per incentive type. A built-in savings calculator lets shoppers stack eligible cash incentives against an MSRP and instantly see the effective price plus an estimated monthly payment at the best APR on offer.",
+    useCases: [
+      { persona: "Car Shoppers", desc: "Check what manufacturer money is on the hood before walking into a dealership — stack loyalty, cash back, and conquest cash against MSRP to see the real out-the-door price." },
+      { persona: "Cross-Shoppers", desc: "Add up to two competing brands (e.g., Toyota vs Honda vs Hyundai) and get an at-a-glance comparison of who offers the best APR, lease, or cash-back deal right now." },
+      { persona: "Dealer Sales Staff", desc: "Keep a tab open while working with customers to quickly recall current OEM programs, stackability rules, and expiration dates without digging through bulletin PDFs." },
+      { persona: "Auto Journalists & Content Creators", desc: "Pull current incentive data for end-of-month deal roundups, best-lease-deal articles, and holiday sales-event coverage." },
+      { persona: "Lenders & Fleet Buyers", desc: "Factor OEM cash and subvented APR into effective loan amounts and fleet acquisition cost comparisons." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "make", desc: "OEM brand — auto-selects the primary make and triggers a search (case-insensitive, e.g. Toyota, toyota, TOYOTA)" },
+      { name: "model", desc: "Vehicle model — pre-fills the model dropdown when a matching make is selected" },
+      { name: "zip", desc: "5-digit US ZIP code — pre-fills the ZIP field for region-specific incentives" },
+      { name: "embed", desc: "Set to 'true' to hide the settings gear for iframe embeds" },
+    ],
     inputParams: [
       { name: "make", type: "string", required: true, desc: "OEM brand (e.g., Toyota)" },
       { name: "model", type: "string", required: false, desc: "Vehicle model" },
       { name: "zip", type: "string", required: false, desc: "ZIP code for regional incentives" },
-      { name: "compareMakes", type: "array", required: false, desc: "Additional brands to compare" },
+      { name: "compareMakes", type: "array", required: false, desc: "Additional brands to compare (up to 2)" },
     ],
     apiFlow: [
-      { step: 1, label: "Primary Brand Incentives", apis: ["incentives"], parallel: false, note: "Fetch incentive programs for the primary make" },
-      { step: 2, label: "Compare Brands (if specified)", apis: ["incentives"], parallel: true, note: "For each compareMake, fetch incentives in parallel" },
+      { step: 1, label: "Primary Brand Incentives", apis: ["incentives"], parallel: false, note: "Fetch incentive programs for the primary make (optionally scoped by model and ZIP)" },
+      { step: 2, label: "Compare Brands (if specified)", apis: ["incentives"], parallel: true, note: "For each compareMake, fetch incentives in parallel — results are used to build the cross-brand comparison table" },
     ],
-    renders: "Incentive cards (cash back, APR, lease), amount displays, term/expiration info, brand comparison columns, filter by offer type",
+    renders: "Incentive cards grouped by brand (color-coded by type: cash back, low APR, lease, loyalty, conquest), amount displays, eligible-models chips, expiration countdown with urgency coloring, expandable fine-print disclosures, cross-brand comparison table highlighting the best deal per type, and a savings calculator sidebar that stacks selected cash incentives against MSRP and computes an estimated monthly payment at the best available APR.",
   },
   {
     id: "incentive-deal-finder",
@@ -370,15 +493,34 @@ const APPS = [
     tagline: "Search ALL OEM incentives by budget, not by brand",
     segment: "Consumer",
     toolName: "find-incentive-deals",
-    description: "Searches incentive programs across all major OEM brands simultaneously. Instead of searching by brand, searches by budget or deal type — showing the best deals across the entire market.",
+    description: "A brand-agnostic incentive discovery tool that fans out in parallel across 15 major OEM brands (Toyota, Honda, Ford, Chevrolet, Hyundai, Kia, Nissan, BMW, Mercedes-Benz, Volkswagen, Subaru, Mazda, Jeep, Ram, GMC) and returns every active cashback, low-APR, and lease offer in one ranked table. Instead of picking a brand first, shoppers pick the dollar outcome they want — max cashback, lowest APR, or a lease under a monthly cap — and the app surfaces the best deals across the entire market. Includes KPI cards (best cashback, lowest APR, average lease payment), a sortable deal table with offer-type and status badges, an expiring-soon alert panel for offers ending within 7 days, two canvas-rendered bar charts (top 10 cashback across brands and best APR vs a 6.5% market baseline), and a built-in savings calculator that computes monthly + lifetime savings of an incentive APR against the prevailing market rate.",
+    useCases: [
+      { persona: "Car Shoppers", desc: "Compare incentives across every brand at once — find the best cashback or lowest APR for your budget without having to shop brand-by-brand." },
+      { persona: "Budget-First Buyers", desc: "Filter leases by max monthly payment to find every sub-$300/mo lease nationwide, or filter cashback by minimum amount to see only meaningful offers." },
+      { persona: "Dealer F&I Desks", desc: "Pitch stackable manufacturer cashback alongside in-house financing, quantifying total customer savings with the built-in payment calculator." },
+      { persona: "Auto Media", desc: "Generate brand-by-brand incentive roundups with accurate expiration dates — the expiring-soon panel flags deals in their last week." },
+      { persona: "MarketCheck API Evaluators", desc: "A concrete example of how to fan out the /search/car/incentive/oem endpoint across multiple makes in parallel and normalize the results into a unified offer schema." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "zip", desc: "ZIP code for regional incentive availability — pre-fills the ZIP input" },
+      { name: "make", desc: "Comma-separated brand filter (e.g., Toyota,Honda) — pre-checks the brand checkboxes" },
+      { name: "offer_type", desc: "Pre-select offer type: 'all', 'cashback', 'apr', or 'lease'" },
+      { name: "max_monthly", desc: "Max lease monthly payment filter (e.g., 400)" },
+      { name: "min_cashback", desc: "Min cashback amount filter (e.g., 2000)" },
+      { name: "embed", desc: "Set to 'true' for embedded mode (hides settings gear)" },
+    ],
     inputParams: [
-      { name: "makes", type: "string", required: false, desc: "Comma-separated makes (defaults to top 10)" },
+      { name: "makes", type: "string", required: false, desc: "Comma-separated makes (defaults to top 15)" },
       { name: "zip", type: "string", required: false, desc: "ZIP code for regional incentives" },
+      { name: "offer_type", type: "string", required: false, desc: "Filter by offer type: cashback, apr, lease, or omit for all" },
+      { name: "max_monthly_payment", type: "number", required: false, desc: "Max monthly lease payment filter" },
+      { name: "min_cashback", type: "number", required: false, desc: "Min cashback amount filter" },
     ],
     apiFlow: [
-      { step: 1, label: "Scan All OEM Incentives", apis: ["incentives"], parallel: true, note: "Fetch incentives for 10+ OEM brands simultaneously in parallel" },
+      { step: 1, label: "Scan All OEM Incentives", apis: ["incentives"], parallel: true, note: "Fetch incentives for 15 OEM brands simultaneously in parallel (one call per brand)" },
     ],
-    renders: "Ranked deal list, filter by type (cash/APR/lease), sortable by amount, brand badges, expiration countdown",
+    renders: "4 KPI cards (total offers, best cashback, lowest APR, average lease payment), sortable deal table with offer-type + status badges, expiring-soon alert panel, top-10 cashback canvas bar chart, best APR canvas bar chart with 6.5% market baseline, savings calculator (monthly and total savings vs market APR)",
   },
   {
     id: "lot-pricing-dashboard",
@@ -386,14 +528,25 @@ const APPS = [
     tagline: "See your entire lot priced against the market",
     segment: "Dealer",
     toolName: "scan-lot-pricing",
-    description: "Pulls a dealer's entire active inventory and overlays market pricing data — showing price gaps, aging alerts, and a hot seller list from sold volume data.",
+    description: "Pulls a dealer's entire active inventory in a single call and overlays MarketCheck reference pricing so inventory managers can see which units are overpriced, underpriced, or sitting too long. Each row flags a DROP / HOLD / RAISE action based on the gap to market, and a state-level hot seller list from the Sold Summary API shows what to stock next. A floor plan burn calculator surfaces the real cash cost of aged units, and the aging heatmap lets you filter the table down to the 61-90 or 90+ day danger zones with one click.",
+    useCases: [
+      { persona: "Used Car Managers", desc: "Daily scan of the lot to spot overpriced units before they age past 60 days and start burning floor plan." },
+      { persona: "Dealer Principals", desc: "Quick read on pricing discipline across the lot — what percent is overpriced, where the aged units are, and what the monthly floor plan burn looks like at the current rate." },
+      { persona: "Inventory Buyers", desc: "Hot list shows which make/model combinations are moving fastest in the state, so wholesale buys line up with real demand instead of gut." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — triggers live mode" },
+      { name: "dealer_id", desc: "MarketCheck numeric dealer ID (not the dealer domain). Required for live mode." },
+      { name: "state", desc: "2-letter state code (e.g. CA, TX) — powers the stocking hot list from the Sold Summary API" },
+      { name: "zip", desc: "Optional dealer ZIP code for geo context" },
+    ],
     inputParams: [
       { name: "dealerId", type: "string", required: true, desc: "MarketCheck dealer ID" },
       { name: "zip", type: "string", required: false, desc: "Dealer ZIP code" },
       { name: "state", type: "string", required: false, desc: "2-letter state code for demand data" },
     ],
     apiFlow: [
-      { step: 1, label: "Dealer Inventory + Hot List", apis: ["searchActive", "soldSummary"], parallel: true, note: "Fetch dealer's active inventory (with stats/facets) and state-level demand rankings in parallel" },
+      { step: 1, label: "Dealer Inventory + Hot List", apis: ["searchActive", "soldSummary"], parallel: true, note: "Fetch dealer's active inventory (with stats/facets + ref_price for gap analysis) and state-level make/model demand rankings in parallel" },
     ],
     renders: "Inventory table with market price gaps, aging heatmap, DOM alerts, body type mix chart, stocking hot list, floor plan burn calculator",
   },
@@ -403,7 +556,19 @@ const APPS = [
     tagline: "Know what to buy at auction",
     segment: "Dealer",
     toolName: "stocking-intelligence",
-    description: "Auction stocking guide powered by sold volume data. Shows which make/model combinations are selling fastest and at what prices in your state, broken down by body type segment.",
+    description: "Auction stocking advisor for used-car dealers. Scores up to 10 VINs with BUY/CAUTION/PASS verdicts, or loads a rooftop's live inventory to flag aging units and fast/slow movers.",
+    useCases: [
+      { persona: "Auction Buyer", desc: "Paste the run-list VINs into the VIN Checker before you walk the lanes — each VIN comes back with predicted retail vs. wholesale price, expected margin, local supply count, and a BUY / CAUTION / PASS recommendation." },
+      { persona: "Used-Car Manager", desc: "Look up your own rooftop or a competitor by dealer_id or domain. See total units, average price/miles/DOM, an inventory concentration heatmap, fast/slow movers from regional sold data, and a list of every unit sitting over 45 DOM." },
+      { persona: "Independent Dealer", desc: "Run the VIN Checker on trade-ins or potential auction buys to sanity-check the retail-to-wholesale spread before writing the ticket." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (Enterprise tier required for the Sold Summary API used in the dealer view)" },
+      { name: "vin", desc: "17-character VIN — pre-fills the VIN Checker textarea; auto-runs in live mode" },
+      { name: "zip", desc: "ZIP code used for local pricing and supply in the VIN Checker" },
+      { name: "dealer_id", desc: "MarketCheck dealer ID — auto-opens the By Dealer Stock tab and loads that dealer's inventory in live mode" },
+      { name: "embed", desc: "Set to any value to render in iframe-embed mode (hides the settings gear)" },
+    ],
     inputParams: [
       { name: "state", type: "string", required: true, desc: "2-letter state code" },
       { name: "zip", type: "string", required: false, desc: "ZIP code" },
@@ -419,17 +584,32 @@ const APPS = [
     tagline: "Shareable market report dealers give buyers",
     segment: "Dealer",
     toolName: "generate-pricing-report",
-    description: "Generates a professional, shareable pricing report that dealers can give to buyers. Shows predicted fair price, active comparables, and sold comparables — building trust through transparency.",
+    description: "Generates a professional, print-ready pricing report that dealers can share with buyers to build trust through market transparency. Enter a VIN, asking price, mileage, and ZIP — the report shows the ML-predicted fair market value, a deal badge (Great Deal to Overpriced), the vehicle's price position across the full local market, a table of active comparable listings within 75 miles, and a table of recently sold comparables from the past 90 days. Includes a print button and a copy-share-link button so dealers can send the report directly to buyers.",
+    useCases: [
+      { persona: "Dealers", desc: "Generate a branded market report to hand to buyers during negotiations — shows your price is fair relative to comparable active listings and recent sales." },
+      { persona: "Car Shoppers", desc: "Ask your dealer for a Pricing Transparency Report on any vehicle you're considering — it shows exactly where the asking price sits relative to the market." },
+      { persona: "Used Car Managers", desc: "Run reports on incoming trade-ins to validate pricing before listing — the active comps table shows exactly what similar vehicles are selling for nearby." },
+      { persona: "Auto Lenders", desc: "Use as a lightweight collateral validation tool — the ML-predicted FMV and market position provide a quick sanity check on the asking price." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "vin", desc: "17-character VIN — auto-fills the form and triggers report generation" },
+      { name: "price", desc: "Dealer asking price — used for deal badge and market position calculation" },
+      { name: "miles", desc: "Current mileage" },
+      { name: "zip", desc: "Dealer ZIP code for local comparable search" },
+      { name: "embed", desc: "Set to 'true' for embedded mode (hides settings gear)" },
+    ],
     inputParams: [
       { name: "vin", type: "string", required: true, desc: "17-character VIN" },
+      { name: "price", type: "number", required: false, desc: "Dealer asking price for deal scoring" },
       { name: "miles", type: "number", required: false, desc: "Current mileage" },
       { name: "zip", type: "string", required: false, desc: "Dealer ZIP code" },
     ],
     apiFlow: [
-      { step: 1, label: "Decode VIN", apis: ["decode"], parallel: false, note: "Get vehicle specs for the report header" },
-      { step: 2, label: "Price + Comps", apis: ["predictRetail", "searchActive", "searchRecents"], parallel: true, note: "Predict price, find active comps within 75mi, and sold comps within 100mi — all in parallel" },
+      { step: 1, label: "Decode VIN", apis: ["decode"], parallel: false, note: "Get vehicle specs (year/make/model/trim/engine/drivetrain/color) for the report header" },
+      { step: 2, label: "Price + Comps", apis: ["predictRetail", "searchActive", "searchRecents"], parallel: true, note: "Three parallel calls: ML retail price prediction with confidence band, active comps within 75mi (with price/miles/DOM stats), and sold comps within 100mi from past 90 days" },
     ],
-    renders: "Professional report layout with vehicle specs header, predicted price bar, active comparable grid, sold comparable grid, printable/shareable format",
+    renders: "Vehicle specs header card (decoded from VIN), deal badge (Great Deal / Good Value / Fair Price / Above Market / Overpriced), price vs market value comparison, price position bar across full market range with percentile marker, active comparables table with distance and DOM, sold comparables table with sold dates, market summary KPIs (total vehicles/median/avg/range/DOM), print button and copy-share-link button",
   },
   {
     id: "dealer-inventory-fit-scorer",
@@ -437,7 +617,20 @@ const APPS = [
     tagline: "Which cars match your sales DNA?",
     segment: "Dealer",
     toolName: "score-dealer-fit",
-    description: "Scores how well a batch of VINs fits a dealer's sales profile. Decodes each VIN, predicts prices, and compares against the dealer's existing inventory mix to find the best matches.",
+    description: "Paste a batch of candidate VINs (up to 20) and a dealer ID; the app decodes each VIN, predicts retail market price, and scores each candidate against the dealer's actual sales DNA — inferred by pulling the dealer's active inventory facets to identify franchise brand, top-selling makes, and top body types. The 10–98 fit score weighs brand alignment (franchise match > complementary > off-brand), body-type match against the dealer's top sellers, mileage tier (fresh/mid/high), and vehicle age, then assigns a BUY / CONSIDER / PASS badge. Output: dealer profile card, sortable candidate table, fit-score-vs-profit-margin scatter plot, sorted fit-score bar chart, top-5 recommended acquisitions, and a reject pile with reasons. Designed for used-car buyers, acquisition managers, and auction pre-bid screening.",
+    useCases: [
+      { persona: "Used Car Buyers", desc: "Pre-screen a list of auction or trade-in candidates against your rooftop's sales history before you bid. Skip the ones that won't turn on your lot." },
+      { persona: "Acquisition Managers", desc: "Batch-evaluate VINs sourced from wholesalers, lease returns, or direct-to-consumer programs. The fit score flags vehicles that fit your franchise profile vs. ones that would sit." },
+      { persona: "Dealer Group Buyers", desc: "Compare the same candidate pool against multiple dealer IDs to decide which rooftop should absorb which vehicle based on fit — not just who has the space." },
+      { persona: "Auction Runners", desc: "Run an auction run-list through the scorer before lane day so the buyer knows which VINs are priority bids for their dealer's profile." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "dealer_id", desc: "MarketCheck dealer ID — pre-fills the dealer field and triggers profile inference from active inventory" },
+      { name: "zip", desc: "Dealer ZIP — used when predicting regional retail pricing" },
+      { name: "vin", desc: "Single VIN to pre-fill the candidate list. For multiple VINs, comma-separate them; the input will expand one per line" },
+      { name: "embed", desc: "Set to 'true' to hide the settings gear (for iframe embedding)" },
+    ],
     inputParams: [
       { name: "vins", type: "string", required: true, desc: "Comma-separated VINs to evaluate" },
       { name: "dealer_id", type: "string", required: false, desc: "Dealer ID for inventory comparison" },
@@ -445,8 +638,9 @@ const APPS = [
     ],
     apiFlow: [
       { step: 1, label: "For each VIN in parallel", apis: ["decode", "predictRetail"], parallel: true, note: "Decode and predict price for every VIN simultaneously" },
+      { step: 2, label: "Fetch dealer inventory profile", apis: ["searchActive"], parallel: false, note: "Search the dealer's active listings with make/body_type facets to infer franchise brand and top-selling body types" },
     ],
-    renders: "Fit score cards for each VIN, make/model/body type match indicators, price tier alignment, recommended vs skip badges",
+    renders: "Dealer profile card, sortable fit-score table, fit-score vs. profit-margin scatter plot, sorted fit-score bar chart, top-5 recommended acquisitions with margin breakdown, reject pile with rejection reasons",
   },
   {
     id: "dealer-conquest-analyzer",
@@ -454,7 +648,20 @@ const APPS = [
     tagline: "Find competitors' best-sellers you should stock",
     segment: "Dealer",
     toolName: "analyze-dealer-conquest",
-    description: "Identifies what competitors are selling that you're missing. Compares your inventory facets against the market, then overlays demand data to find conquest opportunities.",
+    description: "Enter your MarketCheck dealer ID, a ZIP, and a competitive radius; the app fans out four parallel MarketCheck queries — your inventory mix (make/model/body facets), the surrounding market's inventory mix, the top-5 competitor dealer IDs by listing volume in the radius, and an Enterprise sold-vehicles demand ranking — then per-competitor make/model facet lookups for the top 5. The dashboard renders a KPI ribbon (your units, market listings, competitors scanned, gap models, average market price, average DOM), a your-inventory breakdown with model-level counts and percentage bars, 5 competitor cards with make chips and top models, a gap-analysis table ranked by demand score with HIGH/MEDIUM/LOW priority badges, an inventory-mix-vs-market canvas bar chart with over-/under-indexed annotations, acquisition recommendation cards with potential revenue, and a market-share comparison table with an index multiplier per make. On a free-tier API key the Enterprise sold-summary call 403s and the app automatically falls back to deriving demand from market listing counts, so the gap analysis keeps working.",
+    useCases: [
+      { persona: "Used Car Buyers", desc: "Compare your lot's make/model mix against competing rooftops in your market. The gap table tells you which models your competitors stock that you don't — and how much local demand exists for each." },
+      { persona: "Dealer Group Strategists", desc: "Run the same zip against multiple owned rooftops to see which one should absorb a given conquest opportunity. Over-indexed stores get visibility; under-indexed segments get priority." },
+      { persona: "Franchise Managers", desc: "See whether you're under- or over-indexed against market share for your own franchise brand. A BMW dealer stocking 94% BMW in a market that's 60% BMW + 40% mixed might be missing complementary inventory." },
+      { persona: "Market Analysts", desc: "Snapshot a regional competitive landscape — top 5 dealers by listing volume, their brand mix, and which models dominate the area. Useful for M&A due diligence and territory planning." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "dealer_id", desc: "MarketCheck dealer ID (numeric) — pre-fills the form and triggers auto-analysis" },
+      { name: "zip", desc: "ZIP code for the competitive radius (used to find nearby competitor dealers)" },
+      { name: "state", desc: "2-letter state code — used for the Enterprise sold-summary demand ranking (optional; defaults to TX)" },
+      { name: "embed", desc: "Set to 'true' to hide the settings gear (for iframe embedding)" },
+    ],
     inputParams: [
       { name: "dealer_id", type: "string", required: true, desc: "Your MarketCheck dealer ID" },
       { name: "zip", type: "string", required: false, desc: "Dealer ZIP code" },
@@ -462,10 +669,10 @@ const APPS = [
       { name: "state", type: "string", required: false, desc: "State for demand data" },
     ],
     apiFlow: [
-      { step: 1, label: "Your Inventory", apis: ["searchActive"], parallel: false, note: "Fetch your inventory with facets (make, model, body type)" },
-      { step: 2, label: "Market + Demand", apis: ["searchActive", "soldSummary"], parallel: true, note: "Fetch market inventory (nearby dealers) and sold demand rankings in parallel" },
+      { step: 1, label: "Your inventory + market + demand + top competitors", apis: ["searchActive", "searchActive", "soldSummary", "searchActive"], parallel: true, note: "4 API calls in parallel: your dealer's facet breakdown, market-wide facets in the radius, Enterprise sold-vehicle demand rankings (graceful 403 fallback to market-listing proxy on free tiers), and top-5 competitor dealer IDs via dealer_id facet" },
+      { step: 2, label: "Per-competitor inventory facets", apis: ["searchActive"], parallel: true, note: "For each of the top-5 competitor dealer IDs, fetch their make/model facet breakdown in parallel" },
     ],
-    renders: "Gap analysis chart (your mix vs market), conquest opportunity cards, demand-weighted recommendations, competitive heat map",
+    renders: "KPI ribbon (units, listings, competitors, gap models, avg price, avg DOM), your-inventory breakdown with percentage bars, 5 competitor cards with make chips + top models, gap-analysis table ranked by demand with HIGH/MEDIUM/LOW priority, inventory-mix-vs-market canvas bar chart with over-/under-indexed annotations, acquisition recommendation cards with potential revenue, market-share comparison table with index multiplier",
   },
   {
     id: "deal-finder",
@@ -473,7 +680,24 @@ const APPS = [
     tagline: "Best deals scored by price, DOM, and market position",
     segment: "Dealer",
     toolName: null,
-    description: "Best-deal sourcing tool with composite scoring. Searches active inventory, validates each listing against predicted market price, analyzes DOM and price drops for negotiation leverage, and produces a ranked deal list with Buy/Negotiate/Pass verdicts and negotiation talking points.",
+    description: "Paste make/model/year/ZIP/radius/max-price filters and the app fans out a 3-stage MarketCheck pipeline: (1) active search sorted by price ascending with price/miles/DOM stats, (2) per-candidate franchise-retail price prediction, (3) per-candidate listing history plus an Enterprise sold-summary market-timing pull (all in parallel). Each candidate gets a 0–100 composite deal score weighing asking-price delta vs predicted retail, days-on-lot bonus (30d/45d/60d/90d thresholds), and confirmed price-drop count from history — then a BUY / NEGOTIATE / PASS verdict. The dashboard renders a summary ribbon (candidate count, BUY/PASS tallies, avg price, avg DOM, median price-delta), a market-timing pill (Fast / Normal / Slow, Enterprise-API-aware with DOM-distribution fallback on free tiers), and a ranked deal card per candidate with a green→amber→red price-vs-market bar centered on the predicted price, delta callout with percentage, and 2–4 leverage bullets (e.g. 'listed $1,800 below predicted retail', '73 days on lot — dealer likely motivated', 'price dropped 3 times since listing', 'VIN appeared on 2 prior lots'). Built for used-car buyers, retail shoppers, and wholesale sourcing.",
+    useCases: [
+      { persona: "Used Car Buyers", desc: "Filter by make/model/year/ZIP and surface the top 10 deals ranked by a composite score. The leverage bullets tell you exactly what to say in the negotiation — lot age, price drops, prior listings, and how far below predicted retail the asking price already sits." },
+      { persona: "Retail Shoppers", desc: "Set a max price and radius, see the BUY-rated cards, and focus on the ones with the biggest below-predicted delta. The price-vs-market bar makes it immediately obvious whether the dealer is already priced aggressively or leaving room to negotiate." },
+      { persona: "Wholesale Sourcers", desc: "Wider radius + higher max price + no make filter surfaces mispriced inventory across segments. The 60+ day DOM signal combined with a multi-drop price history is a strong wholesale acquisition trigger." },
+      { persona: "Dealer Acquisition Managers", desc: "Scan competing rooftops' aging inventory within your ZIP radius. Deep-lot-age cards with multiple price drops are candidates for a direct-to-dealer approach or auction lane bidding." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "make", desc: "Vehicle make (e.g. Toyota) — pre-fills the form" },
+      { name: "model", desc: "Vehicle model (e.g. Camry) — pre-fills the form" },
+      { name: "year", desc: "Year or range (e.g. 2020-2023)" },
+      { name: "zip", desc: "Required search-center ZIP — pre-fills and triggers auto-submit when a deep-link param is present" },
+      { name: "radius", desc: "Search radius in miles (default 50; allowed 25 / 50 / 100 / 200)" },
+      { name: "maxPrice", desc: "Maximum asking price cap applied via price_range on the active search" },
+      { name: "state", desc: "2-letter state code — used for the Enterprise sold-summary demand ranking (optional; degrades gracefully on free tiers)" },
+      { name: "embed", desc: "Set to 'true' to hide the settings gear (for iframe embedding)" },
+    ],
     inputParams: [
       { name: "make", type: "string", required: false, desc: "Vehicle make" },
       { name: "model", type: "string", required: false, desc: "Vehicle model" },
@@ -483,11 +707,11 @@ const APPS = [
       { name: "maxPrice", type: "number", required: false, desc: "Maximum price" },
     ],
     apiFlow: [
-      { step: 1, label: "Search Deals", apis: ["searchActive"], parallel: false, note: "Search active listings sorted by price ascending with stats (price, miles, DOM)" },
-      { step: 2, label: "Price Validation", apis: ["predictRetail"], parallel: false, note: "Predict market price for top candidates to calculate deal score" },
-      { step: 3, label: "History + Demand", apis: ["carHistory", "soldSummary"], parallel: true, note: "Fetch listing history for negotiation leverage and sold demand for timing analysis" },
+      { step: 1, label: "Search Deals", apis: ["searchActive"], parallel: false, note: "Search active listings sorted by price ascending with stats (price, miles, DOM). price_range applied when maxPrice is supplied" },
+      { step: 2, label: "Price Validation", apis: ["predictRetail"], parallel: true, note: "For each top candidate (up to 10), predict franchise-retail price with VIN + miles + ZIP — runs in parallel across all candidates" },
+      { step: 3, label: "History + Demand", apis: ["carHistory", "soldSummary"], parallel: true, note: "Per-candidate VIN history fans out in parallel alongside one market-wide Enterprise sold-summary; summary 403s on free tiers are caught and the timing pill falls back to the candidate set's own DOM distribution" },
     ],
-    renders: "Ranked deal list with composite scores, Buy/Negotiate/Pass verdict badges, price-vs-market bars, DOM indicators, negotiation leverage points, supply-to-demand timing advice",
+    renders: "Summary ribbon (candidate count, BUY/PASS tally, avg price, avg DOM, median vs market), market-timing pill (Fast / Normal / Slow with fallback), 10 ranked deal cards each with year/make/model/trim heading, verdict badge + score, price/miles/DOM/location/dealer line, green→amber→red price-vs-market bar with predicted-price marker, delta callout with percentage, and 2–4 leverage bullets (below-market margin, DOM window, price-drop count, prior-listings count)",
   },
   {
     id: "appraiser-workbench",
@@ -536,16 +760,31 @@ const APPS = [
     tagline: "Track how vehicles lose value over time",
     segment: "Appraiser",
     toolName: null,
-    description: "Analyzes depreciation patterns using sold vehicle summary data. Shows how average prices vary by make, model, and age — revealing which vehicles hold value and which depreciate fastest.",
+    description: "A depreciation studio for appraisers and analysts. Compare up to four make/model combinations side by side and see how their used-market sale prices fall as the cars age. The app pivots Marketcheck's Sold Vehicles Summary on model_year to derive a month-by-month depreciation curve, then layers in segment depreciation rates (SUV vs Sedan vs Truck etc.) and a state-by-state price index so you can spot regional pricing strength. Toggles for $ Price vs % of MSRP and a 3-month moving average let you cut the curve the way you want, and a hover crosshair surfaces per-model values at any point on the timeline.",
+    useCases: [
+      { persona: "Appraisers", desc: "Quickly answer 'which 3-year-old SUV holds value best?' with a real used-market depreciation curve sourced from Marketcheck's sold vehicle summary." },
+      { persona: "Lenders & Underwriters", desc: "Stress-test collateral assumptions — overlay multiple make/models to see whose curve flattens fastest and use the state index to adjust LTV by geography." },
+      { persona: "Dealership Buyers", desc: "Pick stock that ages well — compare segment depreciation rates and avoid body styles that depreciate fastest in your state." },
+      { persona: "OEM Pricing Teams", desc: "Benchmark your nameplate's residual against direct competitors in the same segment, with state-level price index showing where your model commands a premium." },
+      { persona: "Auto Journalists", desc: "Generate quotable retained-value stats — '% of MSRP at 12 months' is built directly into the chart for any model." },
+    ],
     inputParams: [
-      { name: "make", type: "string", required: false, desc: "Vehicle make to analyze" },
-      { name: "state", type: "string", required: false, desc: "State for regional analysis" },
+      { name: "make", type: "string", required: false, desc: "Vehicle make to analyze (URL deep-link)" },
+      { name: "model", type: "string", required: false, desc: "Vehicle model to pre-select (paired with make)" },
+      { name: "state", type: "string", required: false, desc: "Two-letter US state code for regional analysis" },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your Marketcheck API key — required for live data; without it the app runs in Demo Mode" },
+      { name: "make", desc: "Pre-selects the first model selector's make (e.g. 'Toyota'); switches the app into Single Model view" },
+      { name: "model", desc: "Pre-selects the model — paired with make (e.g. make=Toyota&model=RAV4)" },
+      { name: "state", desc: "Two-letter state code (e.g. 'CA', 'TX') — filters all data to that state" },
     ],
     apiFlow: [
-      { step: 1, label: "Sold Summary by Make", apis: ["soldSummary"], parallel: false, note: "Fetch average sale prices and sold counts by make" },
-      { step: 2, label: "Sold Summary by Body Type", apis: ["soldSummary"], parallel: false, note: "Fetch segment-level depreciation data" },
+      { step: 1, label: "Sold Summary by make/model/year", apis: ["soldSummary"], parallel: true, note: "For each selected model, fetch sold-vehicles/summary pivoted on make,model,model_year — multiple model years per call power the depreciation curve" },
+      { step: 2, label: "Sold Summary by body_type/year", apis: ["soldSummary"], parallel: true, note: "Fetch segment-level data pivoted on body_type,model_year — used to compute monthly depreciation rate per segment" },
+      { step: 3, label: "Sold Summary by state", apis: ["soldSummary"], parallel: true, note: "For the first selected model, fetch state-level breakdown for the geographic price index table" },
     ],
-    renders: "Depreciation curves by make, value retention rankings, segment comparison charts, annual depreciation rates",
+    renders: "Depreciation curves overlay (up to 4 models, $ price or % of MSRP), 3M moving average toggle, hover crosshair tooltip with per-model values, segment depreciation rate bars (highlighted for selected model's segment), state-by-state price index table with hot/cold color coding, insights ticker with retained-value rankings",
   },
   {
     id: "market-trends-dashboard",
@@ -553,14 +792,28 @@ const APPS = [
     tagline: "The pulse of the automotive market",
     segment: "Appraiser",
     toolName: null,
-    description: "Macro-level market trends dashboard using sold vehicle summaries. Shows price trends, volume shifts, and segment dynamics across the automotive market.",
+    description: "Macro-level market trends dashboard using sold vehicle summaries. Shows KPI cards, fastest/slowest movers with MoM comparison, price movers, segment mix donut, brand residual value bars, and a sortable state ranking table. Filters by period, geography, inventory type, body type, and fuel type.",
+    useCases: [
+      { persona: "Market Analysts", desc: "Track national or state-level volume, price, and DOM trends over 30d–1Y periods." },
+      { persona: "OEM / Brand Teams", desc: "Monitor brand residual value (sale price % of MSRP) against competitors." },
+      { persona: "Dealers", desc: "Spot price movers early — MoM shifts signal inventory or demand changes." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key" },
+      { name: "state", desc: "2-letter state code — scopes all data to that state" },
+      { name: "period", desc: "30d | 60d | 90d | 6M | 1Y" },
+      { name: "inventory", desc: "New | Used | Both" },
+      { name: "body", desc: "All | SUV | Sedan | Truck" },
+      { name: "fuel", desc: "All | ICE | EV | Hybrid" },
+    ],
     inputParams: [
       { name: "state", type: "string", required: false, desc: "State for regional trends" },
+      { name: "period", type: "string", required: false, desc: "Time window (30d, 60d, 90d, 6M, 1Y)" },
     ],
     apiFlow: [
-      { step: 1, label: "Market Data", apis: ["soldSummary"], parallel: false, note: "Fetch sold summary with make and body type dimensions" },
+      { step: 1, label: "Market Data (5 parallel)", apis: ["soldSummary"], parallel: true, note: "make+model current period, make+model prior period (MoM), body_type (segment mix), make (brand residuals), summary_by=state (state ranking)" },
     ],
-    renders: "Price trend charts, volume bars, segment market share pie, top movers, regional comparison",
+    renders: "KPI cards, fastest/slowest movers tables, price movers table, segment mix donut chart, brand residual value bar chart, sortable state ranking table",
   },
   {
     id: "group-operations-center",
@@ -568,16 +821,28 @@ const APPS = [
     tagline: "Every store, one screen",
     segment: "Dealership Group",
     toolName: null,
-    description: "Multi-store dashboard showing inventory, pricing, and performance across all locations. Combines active inventory search per location with demand data for benchmarking.",
+    description: "A multi-rooftop command center for dealership groups. Enter the MarketCheck dealer_id for each store and the app fetches active inventory stats per location in parallel, then rolls them up into per-store health cards (units, avg DOM, aged share, 90+ DOM share, health score), group-wide KPIs (total inventory, total aged units, daily floor plan burn estimate), an alert feed driven by real DOM and aging signals, and rebalancing transfer recommendations that pair high-aged stores with the healthiest store in the group. Click any rooftop card to drill into per-store body-type mix, top makes, and price benchmarks.",
     inputParams: [
-      { name: "dealerIds", type: "string", required: true, desc: "Comma-separated dealer IDs for each location" },
-      { name: "state", type: "string", required: false, desc: "State for demand data" },
+      { name: "dealerIds", type: "string", required: true, desc: "Comma-separated dealer IDs for each location, optionally with display names: '1071074:Specialty Cars,1037658,1015446:Metro'" },
+      { name: "state", type: "string", required: false, desc: "Optional state for sold-summary demand overlay (Enterprise tier)" },
     ],
     apiFlow: [
-      { step: 1, label: "Per-Location Inventory", apis: ["searchActive"], parallel: true, note: "For each dealer ID, fetch active inventory with stats and facets in parallel" },
-      { step: 2, label: "Market Demand", apis: ["soldSummary"], parallel: false, note: "Fetch state-level demand rankings for benchmarking" },
+      { step: 1, label: "Per-Location Inventory", apis: ["searchActive"], parallel: true, note: "For each dealer ID, fetch active inventory with stats=price,miles,dom and facets=make,body_type in parallel" },
+      { step: 2, label: "Market Demand", apis: ["soldSummary"], parallel: false, note: "Optional: state-level demand rankings (Enterprise tier only — gracefully skipped on lower tiers)" },
     ],
-    renders: "Store-by-store cards with inventory count, avg price, avg DOM, body type mix, combined group metrics, demand overlay",
+    renders: "Per-rooftop health cards (units, avg DOM, aged %, health score), group KPI ribbon, real-data alert feed, transfer recommendations, drill-down detail view with body-type mix and top makes",
+    useCases: [
+      { persona: "Group GM / Operations Director", desc: "Spot underperforming rooftops at a glance via the health-score ring, drill into a single store, and prioritize aged-inventory remediation across the group." },
+      { persona: "Used Vehicle Director", desc: "See which stores are sitting on 90+ DOM stock, evaluate transfer recommendations that move aged units to the healthiest rooftop, and gauge the floor-plan-burn savings." },
+      { persona: "CFO / Controller", desc: "Estimate daily and monthly floor plan carry across the group, surface alert hotspots, and quantify rebalancing ROI before authorizing transports." },
+      { persona: "M&A / Strategy Analyst", desc: "Benchmark a target group's rooftop-by-rooftop turn velocity, aged share, and price positioning using only public dealer IDs — no portal access needed." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (required for live data; without it the app shows demo data)" },
+      { name: "dealer_ids", desc: "Comma-separated dealer IDs, optionally with display names. Example: <code>?dealer_ids=1071074:Specialty,1037658,1015446:Metro</code> — auto-fills the form and triggers the dashboard build." },
+      { name: "dealer_id", desc: "Alias for <code>dealer_ids</code> when you only have one rooftop." },
+      { name: "embed", desc: "Hide chrome/settings for clean iframe embeds. Example: <code>?embed=true</code>" },
+    ],
   },
   {
     id: "inventory-balancer",
@@ -585,16 +850,29 @@ const APPS = [
     tagline: "Move the right cars to the right stores",
     segment: "Dealership Group",
     toolName: null,
-    description: "Identifies inter-store transfer opportunities by comparing each location's inventory mix against local demand patterns. Suggests which vehicles to move where.",
+    description: "Surfaces inter-store transfer opportunities for a dealership group. For each rooftop, the app pulls live MarketCheck inventory facets (counts by body type) and benchmarks them against state-wide sold-vehicle demand to flag overstocked vs. understocked segments. The supply/demand matrix highlights mismatches per store; the recommendations table ranks specific transfers by expected DOM reduction, transport cost, and net floor-plan savings — letting group ops teams prioritise which vehicles to move where for the biggest payoff.",
+    useCases: [
+      { persona: "Dealership Group Operations", desc: "Run weekly across all rooftops to spot stores sitting on aging segments while a sister store could sell them in days. Prioritise the top transfers by net benefit." },
+      { persona: "Used-Car Director", desc: "Validate inventory mix against local demand without per-store spreadsheets — the matrix shows which body types are overstocked vs. understocked at a glance." },
+      { persona: "Floor-Plan Manager", desc: "Quantify the floor-plan interest savings from re-balancing: the app converts DOM-reduction estimates into dollar net benefit per transfer after transport cost." },
+      { persona: "Group CFO / Strategy", desc: "Use the group-level totals row to track overall mix balance and trend rooftop performance over time." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "dealer_ids", desc: "Comma-separated MarketCheck dealer IDs (one per rooftop) — auto-fills the form and runs the analysis" },
+      { name: "dealer_id", desc: "Alias for a single dealer ID (treated as a one-store group)" },
+      { name: "state", desc: "2-letter US state code (e.g. TX) used to compute the demand baseline from sold-vehicle facets" },
+    ],
     inputParams: [
-      { name: "dealerIds", type: "string", required: true, desc: "Comma-separated dealer IDs" },
-      { name: "state", type: "string", required: false, desc: "State for demand data" },
+      { name: "dealerIds", type: "string", required: true, desc: "Comma-separated MarketCheck dealer IDs" },
+      { name: "state", type: "string", required: false, desc: "2-letter state code for demand baseline" },
     ],
     apiFlow: [
-      { step: 1, label: "All Store Inventories", apis: ["searchActive"], parallel: true, note: "Fetch inventory for every location in parallel" },
-      { step: 2, label: "Demand Data", apis: ["soldSummary"], parallel: false, note: "Fetch sold demand by make/model and body type" },
+      { step: 1, label: "Per-Rooftop Inventory + High-DOM Listings", apis: ["dealerInventoryActive"], parallel: true, note: "For each dealer ID, fetch /v2/car/dealer/inventory/active sorted by dom desc with stats=price,miles,dom and facets=body_type — returns both the inventory mix and the top high-DOM transfer candidate VINs in one call. All rooftops in parallel." },
+      { step: 2, label: "Dealer Profile Lookup", apis: ["dealerInfo"], parallel: true, note: "Fetch /v2/dealer/car/{id} per rooftop in parallel for the store name, city, and state" },
+      { step: 3, label: "State-Wide Demand Baseline", apis: ["searchRecents"], parallel: false, note: "Fetch sold-last-90-days facets by body_type for the state — used to score relative demand per segment" },
     ],
-    renders: "Transfer recommendation cards, supply/demand heatmap per location, mismatch alerts, transfer ROI estimate",
+    renders: "Per-rooftop demand profile cards, supply/demand matrix coloured by Balanced/Understocked/Overstocked, transfer recommendation table populated with real high-DOM VINs from each rooftop ranked by net benefit, group totals with avg demand and total floor-plan savings",
   },
   {
     id: "location-benchmarking",
@@ -672,14 +950,24 @@ const APPS = [
     tagline: "Track collateral health across your loan book",
     segment: "Lender",
     toolName: null,
-    description: "Portfolio-level collateral health dashboard. Tracks average values, depreciation rates, and concentration risk across a loan book using sold summary and market trend data.",
+    description: "Portfolio-level auto loan collateral health dashboard for lenders. Analyzes LTV distribution across a loan book — flagging underwater loans (LTV > 100%), high-risk positions (LTV > 120%), and segment concentration risk. The depreciation heatmap shows real annual depreciation rates by make and vehicle age bracket (0-2yr, 2-4yr, 4-6yr) using live sold vehicle summary data. Key metrics include average portfolio LTV, percentage of underwater vs healthy positions, and average depreciation rate by segment (SUV, Sedan, Truck, EV). A risk watchlist surfaces the highest-LTV loans first so credit teams can triage collateral exposures immediately.",
+    useCases: [
+      { persona: "Auto Lender / Credit Risk Manager", desc: "Monitor portfolio-wide LTV health in real time, triage high-risk loans, and understand which makes and segments are depreciating fastest to adjust underwriting guidelines." },
+      { persona: "Portfolio Analyst", desc: "Identify segment concentration risk (e.g., over-exposure to EVs or luxury brands) and track depreciation trends across vehicle age buckets to forecast collateral value erosion." },
+      { persona: "Chief Risk Officer", desc: "Get a single-screen view of portfolio health KPIs — average LTV, underwater %, high-risk %, retention rate — before credit committee or regulatory reporting." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — activates live depreciation data from the Sold Summary API" },
+      { name: "state", desc: "2-letter state code (e.g. CA, TX) — filters market data to that state for regional portfolio analysis" },
+      { name: "vin", desc: "17-character VIN — pre-fills the VIN lookup field to quickly locate a specific loan in the watchlist" },
+    ],
     inputParams: [
       { name: "state", type: "string", required: false, desc: "State for regional analysis" },
     ],
     apiFlow: [
-      { step: 1, label: "Market Summary", apis: ["soldSummary"], parallel: false, note: "Fetch sold summary by make, body type, and state dimensions" },
+      { step: 1, label: "Market Summary (3 parallel age-bracket calls)", apis: ["soldSummary"], parallel: true, note: "Fetch sold summary by make for 0-2yr, 2-4yr, and 4-6yr vehicle age brackets simultaneously to compute real depreciation rates" },
     ],
-    renders: "Portfolio value index, segment risk heatmap, concentration analysis, depreciation trend overlay",
+    renders: "Portfolio KPI ribbon (total loans, avg LTV, underwater %, high-risk %, avg depreciation, retention %), LTV distribution histogram with exposure amounts, risk watchlist table sorted by LTV, segment exposure donut chart, depreciation heatmap by make × age bracket",
   },
   {
     id: "lender-portfolio-stress-test",
@@ -717,17 +1005,23 @@ const APPS = [
   {
     id: "ev-collateral-risk",
     name: "EV Collateral Risk Monitor",
-    tagline: "EV vs ICE depreciation risk tracking",
+    tagline: "EV vs ICE depreciation risk tracking for lenders",
     segment: "Lender",
     toolName: null,
-    description: "Tracks EV vs ICE depreciation patterns for collateral risk assessment. Uses sold summary data segmented by fuel type to compare value retention across powertrains.",
+    description: "Monitors EV collateral risk for auto lenders by comparing EV and ICE depreciation rates, advance rate recommendations, and state-level EV adoption concentration. Displays a 12-month EV vs ICE average price trend chart, brand-level EV risk table with tier ratings (HIGH/ELEVATED/MODERATE/LOW), state adoption heatmap showing EV penetration %, and suggested LTV caps — helping lenders set tighter advance rates on EV collateral and manage concentration risk.",
     inputParams: [
-      { name: "state", type: "string", required: false, desc: "State for regional analysis" },
+      { name: "state", type: "string", required: false, desc: "2-letter state code for regional EV risk analysis" },
+      { name: "api_key", type: "string", required: false, desc: "MarketCheck API key (Enterprise plan required for live data)" },
+    ],
+    useCases: [
+      { persona: "Auto Lender / Credit Analyst", desc: "Monitor EV vs ICE depreciation gap to calibrate LTV caps and advance rates for EV loans. The EV-to-ICE ratio and risk tier badges flag when tighter lending criteria are warranted." },
+      { persona: "Portfolio Risk Manager", desc: "Track EV concentration risk by state — high-penetration states like CA and WA represent outsized collateral exposure if EV values continue declining faster than ICE." },
+      { persona: "Compliance / ALCO", desc: "Use the advance rate recommendation panel (72% EV vs 92% ICE default) to support policy documentation and stress-test scenarios for EV-heavy loan portfolios." },
     ],
     apiFlow: [
-      { step: 1, label: "EV vs ICE Market Data", apis: ["soldSummary"], parallel: false, note: "Fetch sold summary by body_type and fuel_type_category" },
+      { step: 1, label: "EV vs ICE Market Data", apis: ["soldSummary"], parallel: false, note: "Fetch 12-month sold summary time series by fuel_type_category (EV and ICE), then brand-level and state-level EV breakdowns" },
     ],
-    renders: "EV vs ICE depreciation comparison chart, powertrain risk heatmap, collateral value trends, segment analysis",
+    renders: "12-month EV vs ICE price trend chart (canvas), advance rate recommendation panel, EV/ICE depreciation scorecard ribbon, brand EV risk table with tier badges, state EV adoption heatmap",
   },
   {
     id: "earnings-signal-dashboard",
@@ -735,14 +1029,27 @@ const APPS = [
     tagline: "Pre-earnings channel check for auto tickers",
     segment: "Analyst",
     toolName: null,
-    description: "Channel check dashboard for financial analysts tracking auto sector stocks. Uses sold volume data as a leading indicator for OEM and dealer group earnings.",
+    description: "Pre-earnings channel-check dashboard for financial analysts covering auto OEM equities (F, GM, TM, HMC, TSLA, STLA, HYMTF, NSANY, RIVN). Select a ticker and the app aggregates MarketCheck sold-vehicle and active-inventory data across that issuer's brand portfolio (e.g., GM → Chevrolet+GMC+Buick+Cadillac) and produces a composite BULLISH / BEARISH / MIXED / NEUTRAL signal with confidence score. The 6-Dimension Signal Matrix scores Volume Momentum (monthly sold units + industry share), Pricing Power (average selling price and % vs MSRP), Inventory Health (days supply from active÷monthly-sold), DOM Velocity, EV Mix, and New/Used Ratio — each with its own BULL/BEAR/NEUTRAL badge and 6-month sparkline. A Bull/Bear scenario panel turns the signals into directional thesis bullets and a Key Risk callout sized to forward-EPS impact.",
+    useCases: [
+      { persona: "Sell-Side Analysts", desc: "Ahead of the F/GM/TM print, pull the ticker and get an independent channel read on volume, pricing, and days-supply to sanity-check your model and identify surprise-potential drivers." },
+      { persona: "Buy-Side / Hedge Fund PMs", desc: "Pre-earnings positioning — see which OEMs are showing MSRP-premium erosion or days-supply blowout versus industry; size trades against consensus EPS." },
+      { persona: "Equity Research Associates", desc: "Monthly channel-check memo in seconds — the 6-dimension matrix and scenario bullets drop straight into an investor note or morning call snippet." },
+      { persona: "Portfolio Risk Managers", desc: "Cross-ticker scan: flip through each held auto ticker to surface the one with the weakest inventory/pricing signal before an earnings miss hits the book." },
+      { persona: "Credit Analysts", desc: "OEM bond cover requires read-through on dealer channel health — days-supply and pricing-power deterioration precede covenant stress by a quarter or two." },
+    ],
     inputParams: [
-      { name: "state", type: "string", required: false, desc: "State for regional signals" },
+      { name: "ticker", type: "string", required: false, desc: "Auto OEM ticker (F, GM, TM, HMC, TSLA, STLA, HYMTF, NSANY, RIVN) — selects issuer's brand portfolio" },
+      { name: "state", type: "string", required: false, desc: "2-letter US state code to scope signals regionally (e.g., CA, TX)" },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — required for live market data" },
+      { name: "ticker", desc: "Auto ticker (F, GM, TM, HMC, TSLA, STLA, HYMTF, NSANY, RIVN) — auto-selects and runs analysis on load" },
+      { name: "state", desc: "2-letter US state code — scopes all signals to that region (omit for national)" },
     ],
     apiFlow: [
-      { step: 1, label: "Market Intelligence", apis: ["soldSummary"], parallel: false, note: "Fetch sold summary by make with volume and price measures" },
+      { step: 1, label: "Recents + Active + Industry", apis: ["searchRecents", "searchRecents", "searchRecents", "searchActive", "searchRecents"], parallel: true, note: "Five parallel calls across the ticker's makes: 90-day sold (used), 90-day sold (new), 90-day sold (EV slice via fuel_type=Electric), current active inventory with DOM stats, and industry-wide 90-day sold baseline for share%" },
     ],
-    renders: "Ticker-style signal cards, volume momentum charts, price trend indicators, sector comparison, earnings estimate impact",
+    renders: "Composite signal banner (BULLISH/BEARISH/MIXED/NEUTRAL + confidence bar), 6-dimension signal matrix with sparklines (volume, pricing, inventory, DOM, EV mix, new/used), Bull/Bear scenario panel with thesis bullets, Key Risk callout sized to EPS impact",
   },
   {
     id: "watchlist-monitor",
@@ -750,15 +1057,27 @@ const APPS = [
     tagline: "Morning signal scan across your portfolio",
     segment: "Analyst",
     toolName: null,
-    description: "Morning scan dashboard for analyst watchlists. Monitors sold volume, pricing, and market share changes for tracked OEMs and dealer groups.",
+    description: "Bloomberg-style morning signal scan for equity analysts covering the US auto sector. Monitors a 10-ticker watchlist spanning OEMs (F, GM, TM, HMC, TSLA, STLA) and dealer groups (AN, LAD, KMX, CVNA) against live MarketCheck 90-day sold and active-inventory data. Each ticker is classified ALERT / WATCH / STABLE / STRONG based on four real-time signals: volume momentum (90-day sold share vs expected), ASP spread (sold avg vs active avg — a pricing-power proxy), days-supply (active ÷ monthly-sold × 30), and discount-change (bps derived from the sold-vs-active gap). A sector summary bar rolls up industry volume trend, average ASP, EV penetration, and a macro BULLISH/BEARISH/NEUTRAL call from the signal mix. Click any ticker row to open a detail panel with a 6-month sparkline, metric breakdown, and 3–4 bullet signal analysis explaining why the flag fired. Optional `state=XX` query parameter scopes every signal to a US state.",
+    useCases: [
+      { persona: "Sell-Side Auto Analysts", desc: "Kick off the day with a 10-second scan of your auto watchlist — the table surfaces which issuers have days-supply breaching 90 days or pricing premium turning negative, so you can triage channel checks before the 9am morning call." },
+      { persona: "Buy-Side PMs / Hedge Funds", desc: "Pre-position ahead of OEM prints: the ALERT badges flag which names in your book are showing margin-stress signals (incentive escalation, ASP erosion) that consensus EPS models haven't yet reflected." },
+      { persona: "Credit Analysts", desc: "Monitor dealer-group and OEM leverage names — KMX/CVNA/AN days-supply and pricing spread are leading indicators of covenant-level dealer-channel stress 1–2 quarters before it shows up in 10-Q filings." },
+      { persona: "Automotive Equity Research Associates", desc: "Paste the ticker signals and sparklines directly into the weekly channel-check memo — each ALERT row has ready-made bullet explanations tied to real MarketCheck volume and pricing data." },
+      { persona: "Portfolio Risk Managers", desc: "Cross-ticker health-check: the macro-signal pill on the sector bar gives a one-glance read on whether the automotive book should be de-risked going into the next print cycle." },
+    ],
     inputParams: [
-      { name: "makes", type: "string", required: false, desc: "Comma-separated OEM brands to track" },
-      { name: "state", type: "string", required: false, desc: "State for regional data" },
+      { name: "state", type: "string", required: false, desc: "2-letter US state code (e.g., CA, TX) — scopes all signals to that region" },
+      { name: "tickers", type: "string", required: false, desc: "Reserved for future ticker-list customization; default universe is fixed at the 10 major US auto OEMs + dealer groups" },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — required for live 90-day data; omitted keys show demo-mode sample signals" },
+      { name: "state", desc: "2-letter US state code — scopes every ticker's volume, pricing, and days-supply signals regionally (omit for national)" },
     ],
     apiFlow: [
-      { step: 1, label: "Watchlist Data", apis: ["soldSummary"], parallel: false, note: "Fetch sold summary for tracked brands" },
+      { step: 1, label: "Industry Baselines", apis: ["searchRecents", "searchActive", "searchActive"], parallel: true, note: "Three parallel calls: 90-day sold industry-wide (for share %), full active inventory count (for EV penetration denominator), and EV-only active slice — all scoped to optional state filter" },
+      { step: 2, label: "Per-Ticker Scans", apis: ["searchRecents", "searchActive"], parallel: true, note: "For each of the 10 tickers, issue a recents + active pair in parallel. OEM tickers use make=Ford,Lincoln-style filters; dealer-group tickers use car_type + year-range slices that approximate each issuer's used-market focus. All 20 calls run concurrently." },
     ],
-    renders: "Watchlist cards with signal indicators, volume change alerts, price trend sparklines, market share shifts",
+    renders: "Header with scope + data-source label, sector summary bar (industry volume trend, avg ASP, EV penetration, macro signal pill), sortable 8-column ticker table (ticker, company, signal badge, Vol MoM%, ASP MoM%, days supply, discount change bps, 6-month sparkline canvas), row click opens 340px detail panel with metric grid, enlarged sparkline, and 3–4 bullet signal analysis explaining the badge",
   },
   {
     id: "dealer-group-scorecard",
@@ -766,16 +1085,27 @@ const APPS = [
     tagline: "Benchmark public dealer groups",
     segment: "Analyst",
     toolName: null,
-    description: "Benchmarking dashboard for publicly traded dealer groups (AutoNation, Lithia, Penske, etc.). Uses active inventory and sold data to evaluate operational efficiency.",
+    description: "Bloomberg-style scorecard for the eight publicly traded US dealer groups (AN, LAD, PAG, SAH, GPI, ABG, KMX, CVNA). Each ticker is graded on five live MarketCheck dimensions — Volume (90-day sold share vs the average ticker), Pricing (sold avg vs industry baseline), Turn Rate (inverse of average DOM), Inventory Health (active ÷ monthly-sold days-supply vs industry baseline), and Market Coverage (volume share scaled) — and rolled into a 0-100 composite Health Score that maps to a Strong Buy / Buy / Hold / Watch / Caution signal. The ranking table sorts every ticker by Health Score, the Competitive Radar overlays selected tickers' five-axis profile, the Trend panel shows synthesized 6-month volume / ASP / DOM sparklines for any ticker the user clicks, and a collapsible Peer Comparison Matrix renders best-to-worst conditional formatting across all twelve metrics. Optional `?state=XX` rescopes every ticker's signals to a US state (e.g., AN's CA share jumps from 45.9% national to 51.5% in California).",
+    useCases: [
+      { persona: "Sell-Side Auto Analysts", desc: "One-glance health rankings of every tracked dealer-group ticker — surface the names whose pricing power, days-supply, or volume share are outperforming or breaking down ahead of earnings prints." },
+      { persona: "Buy-Side / Hedge Fund PMs", desc: "Pre-position the franchise vs used-only sub-portfolio: see which group ticker has the strongest composite health and which is flashing Caution before consensus EPS catches up." },
+      { persona: "Credit / Risk Analysts", desc: "Days-supply and inventory-health signals across CarMax / Carvana / Lithia are leading indicators of dealer-channel covenant stress 1-2 quarters before 10-Q filings reflect it." },
+      { persona: "Equity Research Associates", desc: "Drop the radar overlay and the Peer Comparison Matrix straight into a quarterly channel-check memo — every metric is sourced from real 90-day MarketCheck data with state-scoped variants." },
+      { persona: "Portfolio Risk Managers", desc: "Cross-ticker scan: a single screen tells you which dealer-group name to underweight if days-supply is widening or pricing premium is collapsing vs industry." },
+    ],
     inputParams: [
-      { name: "dealerIds", type: "string", required: false, desc: "Dealer IDs for tracked groups" },
-      { name: "state", type: "string", required: false, desc: "State for market context" },
+      { name: "state", type: "string", required: false, desc: "2-letter US state code (e.g., CA, TX) to scope all signals regionally" },
+      { name: "tickers", type: "string", required: false, desc: "Reserved for future ticker customization; the default universe is fixed at the 8 publicly traded US dealer groups (AN, LAD, PAG, SAH, GPI, ABG, KMX, CVNA)" },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — required for live 90-day data; omitted keys show demo-mode sample scorecards" },
+      { name: "state", desc: "2-letter US state code — scopes every ticker's volume share, ASP, days-supply, and trend signals regionally (omit for national)" },
     ],
     apiFlow: [
-      { step: 1, label: "Group Inventory", apis: ["searchActive"], parallel: true, note: "Fetch inventory for each dealer group location" },
-      { step: 2, label: "Market Context", apis: ["soldSummary"], parallel: false, note: "Fetch market-wide data for benchmarking" },
+      { step: 1, label: "Industry Baselines", apis: ["searchRecents", "searchActive"], parallel: true, note: "Two parallel calls scoped to the optional state filter: 90-day sold (for industry volume + ASP + DOM means) and current active inventory (for industry days-supply baseline). These power the share-of-industry, ASP-delta, and DS-ratio used in every ticker's radar axes." },
+      { step: 2, label: "Per-Ticker Scans", apis: ["searchRecents", "searchActive"], parallel: true, note: "For each of the 8 tickers, issue a recents + active pair in parallel using car_type / year-range / make filter slices that approximate the group's competitive segment (AN: car_type=new; PAG: BMW,Mercedes-Benz,Audi,Porsche; KMX: car_type=used + year_range=2017-2022; etc.). All 16 calls run concurrently — total 18 parallel calls." },
     ],
-    renders: "Scorecard comparison table, inventory efficiency metrics, pricing power indicators, market share bars",
+    renders: "Header with scope + data-source label and live LIVE/DEMO badge, sortable 10-column ranking table (rank, ticker, group, health score, volume + MoM, ASP, avg DOM, efficiency, days supply, signal badge), Competitive Radar canvas with per-ticker checkbox toggles overlaying the 5-axis polygon for each selected group, Trend panel with three 6-month sparklines (volume, ASP, DOM) for the row clicked in the ranking table, and a collapsible Peer Comparison Matrix with conditional formatting from green (best) to red (worst) across all twelve metrics",
   },
   {
     id: "oem-stock-tracker",
@@ -793,6 +1123,18 @@ const APPS = [
       { step: 2, label: "Inventory Health + Prior Month", apis: ["searchActive", "soldSummary"], parallel: true, note: "Fetch current active inventory with DOM stats and prior month volume for momentum calculation" },
     ],
     renders: "Ticker-mapped signal cards with BULLISH/BEARISH badges, volume momentum chart (MoM%), pricing power gauge, days supply indicator, market share trend, composite investment thesis per ticker",
+    useCases: [
+      { persona: "Sell-side Auto Analysts", desc: "Pre-earnings signal check across OEM tickers — volume momentum, pricing power, inventory health and market share converted into BULLISH/BEARISH/NEUTRAL/CAUTION read-throughs before quarterly prints." },
+      { persona: "Buy-side Portfolio Managers", desc: "Cross-ticker leading indicators for autos exposure. Compare F vs GM vs TM signals side-by-side to size positions or hedges ahead of guidance updates." },
+      { persona: "Dealer-Group Equity Research", desc: "Track AN, LAD, PAG, KMX, CVNA fundamentals through the lens of inventory health and used-vehicle pricing power — the same data that drives floor-plan economics." },
+      { persona: "Macro / Auto-Cycle Watchers", desc: "EV transition mix and channel inventory days-supply per OEM as inputs to a broader auto-cycle thesis (incentive risk, margin compression triggers)." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (Enterprise tier required for sold-vehicles/summary)" },
+      { name: "tickers", desc: "Comma-separated tickers — auto-fills the input and triggers analysis. Example: F,GM,TM,TSLA" },
+      { name: "state", desc: "Two-letter US state code (e.g. CA) to scope all signals regionally" },
+      { name: "embed", desc: "When present, hides the settings bar for iframe embedding" },
+    ],
   },
   {
     id: "pricing-power-tracker",
@@ -808,6 +1150,17 @@ const APPS = [
       { step: 1, label: "Pricing Power Data", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch price_over_msrp_percentage by make (top 25) and by body_type segment — in parallel" },
     ],
     renders: "Brand pricing power scatter plot (x=volume, y=MSRP premium), above/at/below sticker distribution, segment pricing power bars, trend arrows vs prior period, margin health badges",
+    useCases: [
+      { persona: "Auto Equity Analysts", desc: "Identify which OEMs are commanding sticker premiums vs giving up margin through discounts — a leading indicator of gross profit per unit and warranty/incentive accruals before the print." },
+      { persona: "Dealer Group Strategists", desc: "Spot segments where retail demand is strong enough to clear inventory above MSRP, and where channel weakness is forcing discounts — directly informs floor-plan and contenting decisions." },
+      { persona: "OEM Pricing Teams", desc: "Benchmark your brand's price-over-MSRP against peers within the same body-type segment to flag pricing-power gaps before they show up in earnings guidance." },
+      { persona: "Wholesale / Auction Operators", desc: "Above-sticker brands signal tight retail supply and strong wholesale prints; below-sticker brands signal demand softness and likely auction price compression." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (Enterprise tier required for sold-vehicles/summary)" },
+      { name: "state", desc: "Two-letter US state code (e.g. CA) to scope all signals regionally; omit for national" },
+      { name: "embed", desc: "When present, hides the settings bar for iframe embedding" },
+    ],
   },
   {
     id: "market-share-analyzer",
@@ -822,42 +1175,85 @@ const APPS = [
     ],
     apiFlow: [
       { step: 1, label: "Current vs Prior Share", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch current month make rankings and prior month make rankings — in parallel for bps change" },
-      { step: 2, label: "Segment + Regional", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch body_type segment breakdown and state-level geographic share — in parallel" },
+      { step: 2, label: "Segment Breakdown", apis: ["soldSummary"], parallel: false, note: "Fetch body_type segment breakdown" },
     ],
-    renders: "Brand share ranking table with bps change arrows, segment conquest matrix, geographic share heatmap, volume vs share scatter, momentum badges (gaining/losing/stable)",
+    renders: "Brand share ranking table with bps change arrows, segment conquest matrix, volume vs share scatter, momentum badges (gaining/losing/stable)",
+    useCases: [
+      { persona: "Equity Research Analysts", desc: "Track basis-point share gains and losses by OEM to inform pre-earnings positioning. A brand gaining 50+ bps QoQ is a leading indicator of revenue and unit-economics outperformance." },
+      { persona: "OEM Strategy Teams", desc: "See exactly which segments your brand is winning vs losing — SUV, Truck, Crossover, Sedan — and which competitors are conquesting. Drives product, pricing, and incentive prioritization." },
+      { persona: "Dealer Group Operations", desc: "Identify the brands gaining share in your region so franchise mix and used-vehicle stocking align with where retail demand is moving, not last quarter's snapshot." },
+      { persona: "Investor Relations / Sell-Side", desc: "Build the narrative around state-level geographic share — which states are growth markets, which are declining — using the same Sold Summary data dealers see for their floor-plan decisions." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (Enterprise tier required for sold-vehicles/summary)" },
+      { name: "state", desc: "Two-letter US state code (e.g. CA) to scope brand share regionally; omit for national" },
+      { name: "bodyType", desc: "Segment to highlight in the segment breakdown (e.g. SUV, Truck, Sedan); applied as a UI highlight only" },
+      { name: "embed", desc: "When present, hides the settings bar for iframe embedding" },
+    ],
   },
   {
     id: "claims-valuation-workbench",
     name: "Claims Valuation Workbench",
-    tagline: "Total-loss determination with market evidence",
+    tagline: "Total-loss determination with defensible market evidence",
     segment: "Insurer",
     toolName: "claims-valuation",
-    description: "Insurance claims valuation tool for total-loss determinations. Combines VIN decode, fair market value prediction, sold comparables, regional pricing data, and replacement vehicle search.",
+    description: "Insurance total-loss workbench for adjusters. Decodes the loss vehicle from VIN, pulls a per-VIN ML fair-market-value prediction, fetches recent sold comparables in the local radius, and surfaces real replacement listings near the loss ZIP — all in a single dual-mode page that works standalone, embedded, or inside an MCP host. Renders a 75%-of-FMV repair-threshold determination (NOT TOTAL / LIKELY TOTAL / TOTAL LOSS) backed by salvage range, condition adjustment, and a defensible comparable-evidence grid. With an Enterprise key the Regional Variance panel also populates with state-level avg pricing; with a standard key it degrades cleanly with an in-panel notice. Auto-runs the analysis when opened with `?api_key=…&vin=…&zip=…` URL params for direct deep-linking from claims systems.",
+    useCases: [
+      { persona: "Insurance Adjusters", desc: "Paste a VIN from a loss notice; get a defensible total-loss determination, FMV, salvage range, and recent comp evidence in one screen." },
+      { persona: "Claims Examiners", desc: "Stress-test the adjuster's verdict by adjusting damage severity (Minor/Moderate/Severe/Total) and pre-loss condition (Excellent/Good/Fair/Poor) — the threshold and verdict update live." },
+      { persona: "Subrogation Teams", desc: "Pull replacement-vehicle candidates near the insured's ZIP with real dealer prices and distances to support replacement-cost recovery." },
+      { persona: "Auto Lenders", desc: "Validate collateral value at default with the same per-VIN FMV the adjuster uses, plus a 25th-75th percentile settlement band." },
+      { persona: "Fleet Risk Managers", desc: "Quickly value a damaged unit using VIN + ZIP and decide repair-vs-total without engaging an outside appraiser." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage). Standard tier covers FMV/comps/replacements; Enterprise tier adds Regional Variance." },
+      { name: "vin", desc: "17-character VIN of the loss vehicle — auto-fills form and triggers the analysis on load" },
+      { name: "zip", desc: "ZIP code of the loss / insured (used for local comparable radius and replacement search)" },
+      { name: "miles", desc: "Pre-loss odometer reading (numeric, drives the per-VIN FMV prediction)" },
+    ],
     inputParams: [
-      { name: "vin", type: "string", required: true, desc: "17-character VIN" },
+      { name: "vin", type: "string", required: true, desc: "17-character VIN of the loss vehicle" },
       { name: "miles", type: "number", required: false, desc: "Pre-loss mileage" },
       { name: "zip", type: "string", required: false, desc: "Loss location ZIP" },
-      { name: "condition", type: "string", required: false, desc: "Pre-loss condition" },
+      { name: "condition", type: "string", required: false, desc: "Pre-loss condition: excellent, good, fair, poor" },
       { name: "damageSeverity", type: "string", required: false, desc: "minor, moderate, severe, total" },
     ],
     apiFlow: [
-      { step: 1, label: "Decode VIN", apis: ["decode"], parallel: false, note: "Get vehicle specs for claims form" },
-      { step: 2, label: "FMV + Sold + Regional + Replacements", apis: ["predictRetail", "searchRecents", "soldSummary", "searchActive"], parallel: true, note: "Four parallel calls: fair market value, sold comps, regional pricing data, and replacement vehicle search" },
+      { step: 1, label: "Decode VIN", apis: ["decode"], parallel: false, note: "Resolve vehicle make/model/year/trim from the VIN" },
+      { step: 2, label: "FMV + Sold + Regional + Replacements", apis: ["predictRetail", "searchRecents", "soldSummary", "searchActive"], parallel: true, note: "Four parallel calls: ML fair-market-value, local sold comps, state-level regional pricing (Enterprise), active replacement listings near ZIP" },
     ],
-    renders: "Total loss / repair verdict banner, settlement range bar, FMV breakdown, comparable evidence grid, replacement vehicle options, regional pricing context",
+    renders: "Decoded vehicle bar, total-loss verdict banner with 75% threshold, settlement range with marker, salvage range, comparable sold-evidence grid, real replacement listings with coverage badges, regional state pricing (Enterprise) or empty-state notice (Standard)",
   },
   {
     id: "insurance-premium-benchmarker",
     name: "Insurance Premium Benchmarker",
-    tagline: "Segment-level replacement cost and risk analysis",
+    tagline: "Segment-level replacement cost & risk for underwriting",
     segment: "Insurer",
     toolName: "benchmark-insurance-premiums",
-    description: "Segment-level analysis for insurance premium benchmarking. Breaks down replacement costs and sold volumes by body type, fuel type, and state — giving underwriters data to calibrate premiums.",
-    inputParams: [],
-    apiFlow: [
-      { step: 1, label: "Three-Way Market Breakdown", apis: ["soldSummary", "soldSummary", "soldSummary"], parallel: true, note: "Fetch sold summary by body_type, by body_type+fuel_type, and by state — all in parallel" },
+    description: "Underwriting-grade replacement-cost benchmarker. Pulls ~1000 monthly state×make×model×body-type sold rows from the MarketCheck Sold Summary endpoint plus four parallel per-fuel-type aggregates from active listings, then derives weighted-average replacement cost, price volatility (std/mean), state rankings, top-volatility (make, model) pairs, a sold-count-weighted price distribution, and a real EV-vs-ICE risk comparison. Body × fuel matrix and claims heatmap are illustrative reference data clearly badged as such — the API does not expose fuel-type within the sold-summary aggregates. State / Year From / Year To filters narrow the live API call. Works standalone, embedded, or inside an MCP host.",
+    useCases: [
+      { persona: "Underwriters", desc: "Calibrate base premiums by segment: real avg replacement cost and volatility per state, body type, and EV-vs-ICE — sourced from MarketCheck sold-vehicle aggregates." },
+      { persona: "Pricing Actuaries", desc: "Quantify EV exposure: real EV vs ICE avg cost and volatility differentials from the active-listings endpoint, used to size premium loadings for electric collateral." },
+      { persona: "Insurance Product Managers", desc: "Identify high-volatility makes/models for tier rules — the High-Volatility Models table ranks by std/mean using real sold data." },
+      { persona: "Reinsurance Analysts", desc: "Stress-test geographic concentration with real state-level avg replacement costs and volume." },
+      { persona: "Claims Strategy", desc: "Anticipate severity trends: weighted-average replacement cost across the portfolio is a leading indicator of claim payouts." },
     ],
-    renders: "Replacement cost by segment, EV vs ICE cost comparison, state-level risk heatmap, premium adequacy indicators",
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage). Sold Summary endpoint requires Enterprise tier; without it the page renders illustrative demo data with a clear notice." },
+      { name: "state", desc: "State code (e.g. CA) — narrows the sold-summary call to that state" },
+    ],
+    inputParams: [
+      { name: "body_type", type: "string", required: false, desc: "SUV / Sedan / Truck / Coupe / Van / Convertible / Wagon" },
+      { name: "fuel_type", type: "string", required: false, desc: "Gasoline / Diesel / Hybrid / Electric" },
+      { name: "state", type: "string", required: false, desc: "Two-letter state code" },
+      { name: "year_from", type: "string", required: false, desc: "Start year (passed through to API)" },
+      { name: "year_to", type: "string", required: false, desc: "End year (passed through to API)" },
+    ],
+    apiFlow: [
+      { step: 1, label: "Sold Summary by State", apis: ["soldSummary"], parallel: false, note: "Single call to /api/v1/sold-vehicles/summary?summary_by=state — returns ~1000 rows of (month, state, make, model, body_type) sold counts and price stats. Drives KPIs / state rankings / model rankings / distribution." },
+      { step: 2, label: "Per-Fuel Active Stats × 4", apis: ["searchActive", "searchActive", "searchActive", "searchActive"], parallel: true, note: "Four parallel calls to /v2/search/car/active filtered by fuel_type=Unleaded/Diesel/Hybrid/Electric, each with stats=price&rows=0. Drives the real EV-vs-ICE comparison panel." },
+    ],
+    renders: "KPI ribbon (avg cost / volatility / sample / highest-risk segment — all real), Segment Risk Matrix (illustrative — fuel breakdown unavailable), distribution histogram (real), state rankings (real), real EV vs ICE comparison, real high-volatility (make, model) leaderboard, premium-impact tiers (reference), claims heatmap (illustrative), portfolio composition cards",
   },
   {
     id: "brand-command-center",
@@ -865,7 +1261,7 @@ const APPS = [
     tagline: "Your brands vs the competition",
     segment: "Manufacturer",
     toolName: null,
-    description: "OEM brand intelligence dashboard. Tracks your brand's market share, pricing, and sold volume against competitors using sold vehicle summary data.",
+    description: "OEM brand intelligence dashboard that tracks your brand portfolio's market share, pricing power, and volume momentum against all competitors. Features an interactive market share bar chart (top 15 brands by sold volume with bps change indicators), a pricing power vs volume trend scatter plot with quadrant analysis, model-level drill-down tables with health indicators, state-level regional heatmaps, and conquest/defection flow analysis showing which brands you're gaining from and losing to.",
     inputParams: [
       { name: "make", type: "string", required: true, desc: "Your brand (e.g., Toyota)" },
       { name: "state", type: "string", required: false, desc: "State for regional analysis" },
@@ -874,6 +1270,17 @@ const APPS = [
       { step: 1, label: "Brand + Market Data", apis: ["soldSummary"], parallel: false, note: "Fetch sold summary by make with volume and price measures" },
     ],
     renders: "Brand vs competitor cards, market share bars, price position chart, volume momentum, segment share breakdown",
+    useCases: [
+      { persona: "OEM Product Planners", desc: "Monitor your brand portfolio (e.g., Toyota + Lexus) against competitors in real time. Spot share gains/losses by brand, drill into model-level performance, and identify which competitors are conquesting your buyers." },
+      { persona: "Regional Sales Managers", desc: "Filter by state to see where your brands are strongest or weakest. Use the regional heatmap to prioritize dealer support and marketing spend across geographies." },
+      { persona: "Competitive Intelligence Teams", desc: "Use the pricing power scatter plot to see which brands command above-MSRP pricing vs those discounting. Identify brands in the Distressed quadrant (declining volume + below-MSRP pricing) as conquest opportunities." },
+      { persona: "Dealer Group Executives", desc: "Evaluate brand health before franchise decisions. The model drill-down shows which nameplates are HEALTHY, MIXED, or DECLINING based on volume trends and days-on-market." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "make", desc: "Pre-select a brand for analysis (e.g., Toyota, Ford, Honda)" },
+      { name: "state", desc: "Pre-select a US state for regional filtering" },
+    ],
   },
   {
     id: "regional-demand-allocator",
@@ -881,15 +1288,27 @@ const APPS = [
     tagline: "Allocate inventory where demand is hottest",
     segment: "Manufacturer",
     toolName: null,
-    description: "State-level demand allocation tool for OEMs. Shows where demand is hottest by state and segment, helping guide inventory allocation decisions.",
+    description: "State-level demand and supply analysis tool for OEMs. Computes demand-to-supply (D/S) ratios across 25 US states, color-coded as Undersupplied (green, D/S >= 1.5), Balanced (yellow), or Oversupplied (red, D/S < 0.7). Includes a sortable state demand table with sold volume, active supply, avg sale price, avg DOM, and price/MSRP percentage. Features a segment mix comparison panel showing demand vs inventory split by body type (SUV, Sedan, Truck, etc.) for the top 5 states with mismatch indicators. Generates allocation recommendations showing which units to shift from oversupplied to undersupplied states, ranked by estimated revenue impact.",
     inputParams: [
-      { name: "make", type: "string", required: false, desc: "Your brand" },
+      { name: "make", type: "string", required: false, desc: "Your brand (e.g., Toyota)" },
+      { name: "model", type: "string", required: false, desc: "Specific model (e.g., RAV4)" },
     ],
     apiFlow: [
       { step: 1, label: "State-Level Demand", apis: ["soldSummary"], parallel: false, note: "Fetch sold summary by state with volume rankings" },
       { step: 2, label: "Segment Demand", apis: ["soldSummary"], parallel: false, note: "Fetch sold summary by body type for segment mix" },
     ],
     renders: "Geographic demand heatmap, state ranking table, segment allocation recommendations, supply vs demand indicators",
+    useCases: [
+      { persona: "OEM Distribution Planners", desc: "Identify which states have excess demand (undersupplied) and which are overstocked. Use the allocation recommendations to decide how many units of each segment to shift between regions for maximum revenue impact." },
+      { persona: "Regional Sales Directors", desc: "Sort the state demand table by D/S ratio, avg DOM, or price/MSRP to find the best-performing and worst-performing territories. States with high D/S and above-MSRP pricing are strong markets; states with low D/S and high DOM need attention." },
+      { persona: "Inventory Analysts", desc: "Use the segment mix comparison to spot body-type mismatches. If a state has 38% SUV demand but only 28% SUV inventory, that gap represents lost sales and an opportunity to reallocate." },
+      { persona: "Fleet & Logistics Teams", desc: "The allocation recommendations table quantifies how many units to move, from where, to where, and the estimated revenue impact — directly actionable for transport planning." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "make", desc: "Pre-select a make for analysis (e.g., Toyota, Honda)" },
+      { name: "model", desc: "Pre-select a model (e.g., RAV4, Civic)" },
+    ],
   },
   {
     id: "oem-depreciation-tracker",
@@ -897,17 +1316,33 @@ const APPS = [
     tagline: "How fast are your models losing value vs the competition?",
     segment: "Manufacturer",
     toolName: null,
-    description: "Tracks residual value retention across your brand's models, compares depreciation curves against competitors in the same segments, and highlights models with accelerating or decelerating value loss. Helps product planners and pricing teams see which nameplates hold value and which need intervention.",
+    description: "Brand-level residual value dashboard for OEM product, pricing, and remarketing teams. The app pulls used vs new average sale prices from MarketCheck's Sold Vehicle Summary API for your brand and a chosen competitor set, computes a residual % (used / new) per model, and projects each model's 36-month depreciation curve. It surfaces a KPI strip (your portfolio's weighted residual vs the segment average, best/worst performers, model count), interactive depreciation curves with hover tooltips, a sortable model ranking table with residual badges, body-type segment benchmarks with your brand's positions highlighted, a state-level geographic retention heatmap, and Value Alert cards flagging models that are depreciating unusually fast (≤60%) or holding unusually well (≥75%). Filters let you slice by body type and state for regional or segment-specific deep-dives.",
+    useCases: [
+      { persona: "OEM Product Planners", desc: "See which nameplates hold value and which are leaking residual fast — input for next-generation product decisions and feature investment priorities." },
+      { persona: "Pricing & Incentive Teams", desc: "Identify models that need pricing/incentive intervention before residuals erode further. Compare your portfolio's residual position vs the segment-weighted market." },
+      { persona: "Remarketing & Captive Finance", desc: "Set residual value forecasts for lease programs grounded in actual market behavior, not just guidebook estimates. Spot regional outliers to tune state-level lease offers." },
+      { persona: "Competitive Strategy", desc: "Benchmark your depreciation curves against direct competitors in the same body-type segment. Flag where competitors are pulling ahead on value retention." },
+      { persona: "OEM Field & Region Managers", desc: "Use the geographic heatmap to spot states with weak retention for your brand and target dealer training, marketing, or incentive support to shore up resale strength." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (Enterprise tier required for Sold Vehicle Summary access)" },
+      { name: "myBrand", desc: "Your OEM brand — e.g., Toyota, Ford, Honda. Auto-fills the brand selector. Also accepts make." },
+      { name: "competitors", desc: "Comma-separated competitor brands — e.g., 'Honda,Ford,Hyundai'. Pre-selects the chips." },
+      { name: "bodyType", desc: "Filter to a single body type — SUV, Sedan, Truck, Coupe, Hatchback, or Van. Also accepts body_type." },
+      { name: "state", desc: "2-letter state code to scope analysis to one geography (e.g., CA, TX). Default is national." },
+      { name: "embed", desc: "Set to 'true' for embedded iframe mode (hides demo banner)" },
+    ],
     inputParams: [
       { name: "myBrand", type: "string", required: true, desc: "Your OEM brand (e.g., Toyota)" },
       { name: "competitors", type: "string", required: false, desc: "Comma-separated competitor brands" },
       { name: "bodyType", type: "string", required: false, desc: "Filter by body type (sedan, suv, truck)" },
+      { name: "state", type: "string", required: false, desc: "2-letter state code for regional scope" },
     ],
     apiFlow: [
-      { step: 1, label: "Brand + Competitor Residual Data", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch sold summary for your brand and competitors by make+model with average_sale_price and sold_count — in parallel" },
-      { step: 2, label: "Segment Benchmark + Regional", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch body-type segment benchmarks and state-level geographic retention data — in parallel" },
+      { step: 1, label: "Brand + Competitor Residual Data", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch make+model sold summary for Used and New inventory in parallel — used to compute residual % per model (used / new)" },
+      { step: 2, label: "Segment Benchmark + Regional", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch body-type segment benchmarks and state-level geographic retention for your brand — in parallel" },
     ],
-    renders: "Depreciation curves (your models vs competitors over time), model-by-model residual ranking table, body-type segment benchmark comparison, geographic heatmap of price retention by state, Value Alert badges for fast-depreciating models",
+    renders: "Depreciation curves (your models vs competitors over a 36-month projection with hover tooltips), model-by-model residual ranking table with your brand highlighted, body-type segment benchmark bar chart, geographic heatmap of price retention by state (index vs national avg), Value Alert cards for fast-depreciating and strong-retention models, KPI strip with weighted brand residual vs market",
   },
   {
     id: "ev-transition-monitor",
@@ -915,14 +1350,27 @@ const APPS = [
     tagline: "Track your electrification progress against the market",
     segment: "Manufacturer",
     toolName: null,
-    description: "OEM-focused EV dashboard that tracks your brand's EV vs ICE sales mix, compares EV penetration to competitors, maps state-level EV adoption to guide production allocation, and monitors EV pricing parity. Unlike the cross-segment EV Market Monitor, this is brand-centric: 'How is MY electrification strategy performing?'",
+    description: "OEM-focused EV dashboard that tracks how your brand's electrification stacks up against the market. The report decomposes brand performance into four lenses: (1) your EV vs ICE sales mix versus the market average, (2) a competitor leaderboard ranking the top EV makers by sold volume, mix %, average price, and days-on-market, (3) a state-level adoption heatmap showing where your EVs sell well and where the white space sits, and (4) an EV vs ICE pricing parity chart by body type so product planners can see segment-level price premiums. A composite Electrification Score (0–100) summarises whether your brand is leading, on track, or lagging the broader transition.",
+    useCases: [
+      { persona: "OEM Strategy Teams", desc: "Diagnose whether the brand's EV mix is keeping pace with the market and identify body-type segments where pricing parity has shifted enough to warrant a new EV nameplate." },
+      { persona: "OEM Product Planners", desc: "Compare segment-level price premiums (SUV vs sedan vs truck) to decide which body types to electrify next and what price corridor the market is actually clearing at." },
+      { persona: "OEM Regional Managers", desc: "Use the state heatmap to allocate EV production and dealer training to the high-adoption states and avoid over-shipping to ICE-dominant regions." },
+      { persona: "OEM Pricing Teams", desc: "Track average sale price and days-on-market for your EVs versus competitors — early-warning signal for over- or under-priced EV inventory." },
+      { persona: "Investors / Analysts", desc: "Quantify a manufacturer's electrification progress with one score combining mix %, growth slope, and turn velocity." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (Enterprise subscription required for sold-summary)" },
+      { name: "myBrand", desc: "Your OEM brand — auto-fills the form and triggers analysis (e.g., Ford, Hyundai, BMW)" },
+      { name: "competitors", desc: "Comma-separated competitor brands to highlight on the leaderboard (e.g., Tesla,Hyundai,Kia)" },
+      { name: "embed", desc: "Set to 'true' for embedded mode (hides settings gear)" },
+    ],
     inputParams: [
       { name: "myBrand", type: "string", required: true, desc: "Your OEM brand (e.g., Ford)" },
       { name: "competitors", type: "string", required: false, desc: "Comma-separated competitor brands" },
     ],
     apiFlow: [
-      { step: 1, label: "EV Market Rankings", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch EV sold rankings by make (top 15) and your brand's EV volume by state — in parallel" },
-      { step: 2, label: "Price Parity + Segment Mix", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch EV vs ICE price comparison by body_type+fuel_type_category and total brand volume for mix % — in parallel" },
+      { step: 1, label: "EV Market Rankings", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch EV sold rankings by make+fuel_type_category and your brand's EV volume by state+fuel_type_category — in parallel" },
+      { step: 2, label: "Price Parity + Brand Totals", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch EV vs ICE price comparison by body_type+fuel_type_category and total sold-count by make for ICE backfill — in parallel" },
     ],
     renders: "EV mix % trend line for your brand, competitor EV leaderboard with sold count and avg price, state-level EV heatmap for your brand, EV vs ICE price parity chart by body type, Electrification Score KPI card",
   },
@@ -932,7 +1380,22 @@ const APPS = [
     tagline: "Which trims and configs are the market buying?",
     segment: "Manufacturer",
     toolName: null,
-    description: "Analyzes trim-level and body-type demand for a specific model, comparing active inventory distribution against sold patterns to identify which configurations are over- or under-supplied. Helps OEM product planners understand which trims to produce more of and which to de-emphasize.",
+    description: "OEM product planning dashboard that quantifies which trims and content packages are actually moving for a specific model. Pulls active inventory facet counts (trim, body_type, fuel_type) from the live MarketCheck dataset, compares them to recent sold mix and Enterprise Sold Vehicle Summary rankings, and surfaces every trim's supply-vs-demand imbalance in basis points. Then samples the slowest- and fastest-moving listings, decodes their VINs, and lays out a side-by-side feature comparison so you can see whether AWD, sunroof, leather, or wheel size is the content actually driving turn rate. Outputs a 0–100 Contenting Score, oversupplied/undersupplied badges per trim, a price-by-DOM scatter, a body-type demand table, and plain-English insights ranking the largest trim mismatches and content drivers.",
+    useCases: [
+      { persona: "OEM Product Planners", desc: "Decide which trims to over-build next quarter. The supply vs demand mismatch table flags trims where inventory share is materially out of step with sold share — that's exactly where allocation should shift." },
+      { persona: "OEM Pricing & Incentives", desc: "Find oversupplied trims that are sitting on lots (high DOM, oversupplied badge) and target them with incentives or MSRP adjustments instead of brand-wide spend." },
+      { persona: "Regional Sales Managers", desc: "Pass a state code to see whether a regional market wants different content than the national mix — useful for redirecting inventory between zones." },
+      { persona: "Dealer Group Buyers", desc: "Use the price-by-DOM scatter and feature comparison grid to source inventory in the trim-and-content combinations that turn fastest in your market." },
+      { persona: "Auto Analysts / Press", desc: "Quote concrete numbers — 'X trim is undersupplied at Y bps' — backed by real listing-level data instead of OEM-reported wholesale figures." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage). Trim-level analysis works with any key; body-type demand requires Enterprise." },
+      { name: "make", desc: "OEM brand to analyze (e.g., Honda) — auto-fills the form and triggers the analysis" },
+      { name: "model", desc: "Model name to analyze (e.g., CR-V) — auto-fills the form and triggers the analysis" },
+      { name: "year", desc: "Model year or range (e.g., 2024 or 2022-2024) — narrows the analysis to a specific generation" },
+      { name: "state", desc: "Two-letter US state code (e.g., CA) — restricts both inventory and sold-summary calls to that market" },
+      { name: "embed", desc: "Set to 'true' to hide the settings gear for iframe embeds" },
+    ],
     inputParams: [
       { name: "make", type: "string", required: true, desc: "Your brand (e.g., Honda)" },
       { name: "model", type: "string", required: true, desc: "Model to analyze (e.g., CR-V)" },
@@ -951,33 +1414,56 @@ const APPS = [
     name: "Market Momentum Report",
     tagline: "Monthly market pulse for strategic planning",
     segment: "Manufacturer",
-    toolName: null,
-    description: "Monthly strategic briefing for OEM leadership. Shows month-over-month volume changes by brand and segment, pricing power trends, days-supply health, and which competitors are gaining or losing ground. Designed to be the 'one report' an OEM exec reads at the start of each month.",
+    toolName: "market-momentum-report",
+    description: "The one-page monthly strategic briefing for OEM leadership. Answers four questions in a single screen: (1) how is my brand's share moving month-over-month, (2) which body-type segments are shifting toward or away from me, (3) is pricing power (transaction price vs MSRP) intact, and (4) am I healthy on days-of-supply. Also surfaces my currently-running incentive programs and auto-generates a 'Market Signals' callout with conquest threats and the strongest growing/declining segments. Built primarily on MarketCheck's Enterprise Sold Vehicle Summary API (six month-over-month rankings); also uses /v2/search/car/active for the days-supply numerator and /v2/search/car/incentive/oem for the active-incentive cards.",
+    useCases: [
+      { persona: "OEM Strategy", desc: "Month-over-month share and segment-mix shifts by make and body type — know who gained or lost basis points and where, with drill-down into specific states." },
+      { persona: "Product Planning", desc: "Track pricing power against MSRP alongside days-of-supply to calibrate production plans and decide when to add or pull back incentive support." },
+      { persona: "Regional Sales Ops", desc: "Filter by state to see where your brand is momentum-positive or losing ground to a specific conquest threat — surface the one competitor gaining fastest in your market." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck Enterprise API key (sold-summary requires Enterprise tier). Also persistable via localStorage." },
+      { name: "myBrand", desc: "OEM brand name — one of the 30 US OEMs that run incentive programs (Acura, Audi, BMW, Buick, Cadillac, Chevrolet, Chrysler, Dodge, Fiat, Ford, Genesis, GMC, Honda, Hyundai, Infiniti, Jaguar, Jeep, Kia, Land Rover, Lexus, Lincoln, Mazda, Mini, Mitsubishi, Nissan, Porsche, RAM, Subaru, Toyota, Volvo). Auto-fills the selector and triggers the report." },
+      { name: "state", desc: "Optional 2-letter US state code for regional focus" },
+      { name: "embed", desc: "Set to 'true' for embedded iframe mode (hides the settings gear and demo banner)" },
+    ],
     inputParams: [
       { name: "myBrand", type: "string", required: true, desc: "Your OEM brand" },
       { name: "state", type: "string", required: false, desc: "State for regional focus" },
     ],
     apiFlow: [
-      { step: 1, label: "Current vs Prior Month + Segments", apis: ["soldSummary", "soldSummary", "soldSummary"], parallel: true, note: "Fetch current month make rankings, prior month make rankings, and body-type segment data — all in parallel" },
-      { step: 2, label: "Pricing Power + Days Supply + Incentives", apis: ["soldSummary", "searchActive", "incentives"], parallel: true, note: "Fetch pricing power (price_over_msrp), current inventory with DOM stats, and your active incentive programs — all in parallel" },
+      { step: 1, label: "Current + Prior Month Rankings (Make + Body Type)", apis: ["soldSummary", "soldSummary", "soldSummary", "soldSummary"], parallel: true, note: "Fetch current + prior month make rankings AND current + prior body-type segment data — all in parallel. Two month windows × two ranking dimensions = four calls powering the MoM bps-delta computations. Each soldSummary call requires date_from + date_to (YYYY-MM-DD) covering the target month, plus ranking_dimensions and ranking_measure." },
+      { step: 2, label: "Pricing Power + Active Inventory + Incentives", apis: ["soldSummary", "searchActive", "incentives"], parallel: true, note: "Pricing power ranking by price_over_msrp_percentage, active-inventory count (the searchActive call's num_found is the numerator of days-supply; the monthly sold count from Step 1 is the denominator), and OEM incentive programs — all parallel." },
+      { step: "2b", label: "Conditional myBrand fallbacks", apis: ["soldSummary", "soldSummary", "soldSummary"], parallel: false, note: "Fires only when myBrand falls outside top-25 in currentMakes / priorMakes / pricingPower. Adds 0–3 scoped soldSummary calls (filtered by make=myBrand) so small/niche brands still appear in the KPI strip and scatter. myBrandCurrent and myBrandPrior are folded into Step 2's Promise.all (null slots when not needed); myBrandPricing is sequential because it depends on Step 2's pricingPower result. Worst-case total: 10 calls. Happy path: 7 calls." },
     ],
-    renders: "Executive summary KPI strip (market volume / share change / pricing power), brand momentum table sorted by bps change, segment mix shift chart, pricing power scatter plot, days-supply gauge, active incentive summary cards, Market Signals callout box",
+    renders: "Executive summary KPI strip (market volume / share Δ / pricing power / days of supply), brand momentum table sorted by |Δ bps| with your brand highlighted, segment mix shift chart (current vs prior), pricing power scatter plot (% of MSRP vs volume, bubble size = volume), days-supply arc gauge with healthy/watch/glut zones, active incentive summary cards grouped by offer type, and an auto-generated Market Signals callout box with conquest threats and segment trend alerts",
   },
   {
     id: "incentive-effectiveness-dashboard",
     name: "Incentive Effectiveness Dashboard",
     tagline: "Are your incentives moving metal?",
     segment: "Manufacturer",
-    toolName: null,
-    description: "Correlates OEM incentive programs with actual sales velocity (DOM) and volume changes. Shows which incentive programs are associated with faster turns and higher volumes, and which models might need more (or different) incentive support. Critical for incentive budget optimization.",
+    toolName: "incentive-effectiveness-dashboard",
+    description: "An OEM-focused ROI lens on incentive spend. For a chosen brand (and optionally a state), pulls every active OEM offer (cash back / low APR / lease specials) alongside Enterprise Sold Vehicle Summary rankings and active-inventory facets, then joins them by model to compute one number that matters: average days-on-market WITH incentive support vs WITHOUT. Surfaces a Model × Incentive-Type matrix, per-model velocity arrows vs the brand baseline, an inventory-coverage donut showing which slices of your live lot are protected by an active program, and rule-based ROI signal badges (Increase support / Reduce spend / On track) to drive next-month budget reallocation. Built on /v2/search/car/incentive/oem, /api/v1/sold-vehicles/summary (Enterprise) for both make+model and body_type rankings, and /v2/search/car/active with model+body_type facets — all four calls fire in parallel.",
+    useCases: [
+      { persona: "OEM Incentive Strategy", desc: "See which models are turning faster than baseline because of a stacked offer mix and which slow movers carry no support — reallocate spend from over-incentivized winners to under-supported laggards." },
+      { persona: "Product Marketing", desc: "Audit program breadth across the lineup at a glance: which body types and price tiers are over-covered vs uncovered, with side-by-side amounts for cash back, APR, and lease so you can spot inconsistent offer ladders." },
+      { persona: "Regional Sales Ops", desc: "Filter by state to see whether national incentives are landing in your region — pair the velocity bars with inventory-coverage donut to identify rooftops sitting on aged stock that lacks active OEM support." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck Enterprise API key (sold-summary requires Enterprise tier; incentives + active search work on free keys). Persistable via localStorage." },
+      { name: "make", desc: "OEM brand name — pick from the 30 US OEMs that run incentive programs (Acura, Audi, BMW, Buick, Cadillac, Chevrolet, Chrysler, Dodge, Fiat, Ford, Genesis, GMC, Honda, Hyundai, Infiniti, Jaguar, Jeep, Kia, Land Rover, Lexus, Lincoln, Mazda, Mini, Mitsubishi, Nissan, Porsche, RAM, Subaru, Toyota, Volvo) or pass any other brand via the Other… input. Auto-fills the selector and triggers the report. Aliased as `brand`." },
+      { name: "state", desc: "Optional 2-letter US state code for regional focus. Omit or set to National for nationwide rollup." },
+      { name: "embed", desc: "Set to 'true' for embedded iframe mode (hides the settings gear and demo banner)." },
+    ],
     inputParams: [
       { name: "make", type: "string", required: true, desc: "Your OEM brand" },
       { name: "state", type: "string", required: false, desc: "State for regional analysis" },
     ],
     apiFlow: [
-      { step: 1, label: "Incentives + Sales + Inventory", apis: ["incentives", "soldSummary", "searchActive"], parallel: true, note: "Fetch all current incentives for your brand, model-level sold performance (volume + DOM), and active inventory with model facets — all in parallel" },
+      { step: 1, label: "Incentives + Sold-by-Model + Sold-by-Body-Type + Active Inventory", apis: ["incentives", "soldSummary", "soldSummary", "searchActive"], parallel: true, note: "Four calls fire concurrently with Promise.all — happy-path latency is the slowest single call. (1) /v2/search/car/incentive/oem returns every live program for the brand (cash back, APR, lease, loyalty, conquest). (2) sold-summary with ranking_dimensions=make,model and ranking_measure=sold_count returns model-level monthly volume — and because ranking_measure is singular per MC API, average_sale_price and average_days_on_market come back on every row regardless, so this single call also powers the velocity arrows. (3) sold-summary with ranking_dimensions=body_type seeds the segment-mix breakdown for the inventory-coverage overlay. (4) /v2/search/car/active with stats=price,miles,dom and facets=model,body_type provides the brand-level DOM baseline (stats.dom.avg ?? stats.dom.mean) and per-model active inventory counts. Each call is wrapped with .catch(()=>null) so a 401/403 on the Enterprise sold-summary endpoint still lets the page render with whatever data did come back — the live-mode banner reflects 'partial' state when this happens." },
     ],
-    renders: "Model-by-model incentive matrix (rows = models / columns = incentive types with amounts), velocity change indicator per model (DOM trend arrow), volume impact chart, Incentive ROI signal badges (Increase support / Reduce spend / On track), active inventory pie with incentive coverage overlay",
+    renders: "Four-card KPI strip (Active Programs, Models Covered with coverage %, Avg DOM with incentive, Avg DOM without incentive — green delta when incentives accelerate turn), Model × Incentive-Type matrix table with cash-back / low-APR / lease columns and a left border-color tied to the row's ROI signal, horizontal Canvas bar chart of velocity by model (bar length = monthly sold volume, bar color = green if turning faster than brand baseline DOM / red if slower) with the brand-avg DOM line overlaid, Canvas donut of active-inventory share by model with solid slices for incentive-covered models and faded slices for uncovered ones, an auto-sorted card grid of active programs with offer-type badge and days-until-expiration urgency tint, a Recommendations table of every model not on track with an Increase-Support / Reduce-Spend badge and a one-liner reason, and a Market Signals callout with rule-based bullets (coverage %, biggest red flag, reallocation candidate, program mix breakdown, expiration alerts).",
   },
   {
     id: "auction-lane-planner",
@@ -985,15 +1471,29 @@ const APPS = [
     tagline: "Plan lanes, price consignments, target buyers",
     segment: "Auction House",
     toolName: null,
-    description: "Auction lane planning tool. Uses market data to help auction houses organize lanes, set reserve prices, and identify target buyers based on local demand patterns.",
+    description: "End-to-end sale-day planning workspace for wholesale auction houses. Pulls live market activity for the chosen state/ZIP and produces four linked views: a Lane Overview grid (segments by body type with unit count, average expected hammer at 0.85× retail, demand/supply ratio, sell-through %, and revenue estimate), a Consignment Pipeline of high-DOM dealer inventory ripe for consignment sourcing (sorted longest-on-lot first, with seller margin vs current list price), a Buyer Targeting list of cities with the strongest active inventory density (proxy for active buyer demand), and a Run List Pricer where you paste up to 15 VINs and get per-VIN expected hammer prices, IQR price ranges from real comparables, and a sell-through confidence verdict (High / Medium / Low). Works in demo (mock data), live (real MarketCheck API), and MCP (AI assistant) modes.",
+    useCases: [
+      { persona: "Auction Sale Managers", desc: "Plan next Tuesday's lanes — see which segments will move at what price, where unit counts are concentrated, and project total sale revenue before the gavel drops." },
+      { persona: "Consignment Sourcing", desc: "Identify aged dealer inventory (90+ days on market) that's a strong consignment candidate — see expected hammer vs current list price and the margin a dealer gives up by sending it to auction." },
+      { persona: "Buyer Relations Teams", desc: "Surface dealers in nearby cities who are short on the segments you're running — turn the Buyer Targeting list into a call sheet for sale-day attendance." },
+      { persona: "Wholesale Brokers", desc: "Paste a run list of VINs and instantly see per-vehicle hammer estimates with IQR ranges and confidence — pre-screen which units to bid on before walking the lanes." },
+      { persona: "Dealer Wholesale Desks", desc: "Decide whether to wholesale aged units in-house or send to auction — compare expected hammer to current market price and net spread." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via the gear icon / localStorage)" },
+      { name: "state", desc: "Two-letter state code (e.g. TX, CA, NY) — drives the Lane Overview, Consignment Pipeline, and Buyer Targeting data. Defaults to TX." },
+      { name: "zip", desc: "ZIP code — passed to the predict endpoint for the Run List Pricer; falls back to a major-city ZIP for the chosen state if omitted" },
+    ],
     inputParams: [
-      { name: "state", type: "string", required: true, desc: "Auction state" },
-      { name: "zip", type: "string", required: false, desc: "Auction ZIP code" },
+      { name: "state", type: "string", required: true, desc: "Auction state (two-letter code, e.g. TX)" },
+      { name: "zip", type: "string", required: false, desc: "Auction ZIP code — used for run-list price prediction" },
+      { name: "runListVins", type: "array", required: false, desc: "Array of VINs to price as a run list (set when the Price Run List button is clicked)" },
     ],
     apiFlow: [
-      { step: 1, label: "Demand + Pricing Data", apis: ["soldSummary", "searchActive"], parallel: true, note: "Fetch demand rankings and current market pricing in parallel" },
+      { step: 1, label: "Lane Overview + Pipeline (parallel)", apis: ["searchActive", "searchActive"], parallel: true, note: "Two parallel /search/car/active calls: (a) faceted on body_type with rows=0 + price stats — drives the Lane Overview segment grid; (b) sort_by=dom_active desc + rows=15 — drives the Consignment Pipeline of aged inventory and (by aggregating dealer.city) the Buyer Targeting list." },
+      { step: 2, label: "Run List Pricer (per-VIN, parallel)", apis: ["decode", "predictRetail"], parallel: true, note: "Triggered when the user clicks Price Run List. For each VIN: decode VIN to get year/make/model, estimate miles from year (≈ 12k/yr clamped 5k–150k), then call /predict with vin+miles+zip+dealer_type=franchise. Hammer = 0.92 × marketcheck_price; IQR range from comparables.stats.price percentiles; confidence from comp count + price band." },
     ],
-    renders: "Lane planning grid, reserve price suggestions, buyer targeting cards, demand-based lane ordering",
+    renders: "Lane Overview table (Segment / Unit Count / Avg Expected Hammer / D/S Ratio / Sell-Through % with color-coded badge / Revenue Estimate, plus a totals/avg row), side-by-side Consignment Pipeline (sticky header, scrollable, DOM-color-coded, Prospect button per row) and Buyer Targeting list (city + inventory gap badge), and a Run List Pricer textarea (paste up to 15 VINs) that renders results as a table with VIN, year/make/model, expected hammer, IQR price range, comp count, and a High/Medium/Low sell-through confidence pill",
   },
   {
     id: "auction-arbitrage-finder",
@@ -1017,14 +1517,25 @@ const APPS = [
     tagline: "Pre-sale VIN evaluation with hammer price predictions",
     segment: "Auction House",
     toolName: null,
-    description: "Evaluates a batch of consigned VINs before sale day. For each VIN, decodes specs, predicts retail and wholesale prices, calculates expected hammer price (0.92x retail factor), and produces a BUY/CAUTION/PASS sell-through prediction based on market demand and pricing position.",
+    description: "Evaluates a batch of up to 15 consigned VINs before sale day. For each VIN, decodes full specs via NeoVIN, predicts franchise (retail) and independent (wholesale) fair market values, calculates expected hammer price using a 0.92x retail factor, computes the retail-to-wholesale spread, scores market demand from active listing volume, and produces a BUY/CAUTION/PASS sell-through verdict. Results are displayed in a sortable run list table with summary cards, a sell-through probability gauge, and a per-vehicle demand bar chart.",
+    useCases: [
+      { persona: "Auction Managers", desc: "Evaluate the full run list before sale day — set lane order, identify high-confidence lots, and forecast total revenue from expected hammer prices." },
+      { persona: "Wholesale Buyers", desc: "Pre-screen which VINs are worth bidding on by comparing hammer estimates against wholesale prices and checking demand scores." },
+      { persona: "Consignment Reps", desc: "Set realistic seller expectations by showing predicted hammer prices, spread analysis, and sell-through probability for each consigned vehicle." },
+      { persona: "Floor Plan Analysts", desc: "Assess portfolio risk by running aged inventory VINs through the analyzer to identify units likely to sell vs. those that may need price cuts." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "vins", desc: "Comma-separated VINs (up to 15) — auto-fills the form and triggers analysis" },
+      { name: "zip", desc: "Auction location ZIP code for local market pricing (default: 90210)" },
+    ],
     inputParams: [
-      { name: "vins", type: "string", required: true, desc: "Comma-separated VINs on the run list" },
+      { name: "vins", type: "string", required: true, desc: "Comma-separated VINs on the run list (up to 15)" },
       { name: "zip", type: "string", required: false, desc: "Auction location ZIP" },
     ],
     apiFlow: [
       { step: 1, label: "For each VIN in parallel", apis: ["decode", "predictRetail", "predictWholesale"], parallel: true, note: "Decode specs + predict retail and wholesale prices for every VIN simultaneously" },
-      { step: 2, label: "Market Context", apis: ["soldSummary"], parallel: false, note: "Fetch sold demand data to assess sell-through probability per make/model" },
+      { step: 2, label: "Market Context", apis: ["searchActive"], parallel: true, note: "Fetch active listing counts per make/model to score market demand" },
     ],
     renders: "Run list table with expected hammer prices, BUY/CAUTION/PASS verdicts, retail-to-wholesale spread, sell-through probability gauge, make/model demand indicators",
   },
@@ -1034,7 +1545,18 @@ const APPS = [
     tagline: "Find dealers with aged inventory ripe for consignment",
     segment: "Auction House",
     toolName: null,
-    description: "Identifies dealers with aged and overpriced inventory who are prime candidates for consignment. Searches active listings filtered by high days-on-market, calculates floor plan burn, and ranks dealers by consignment opportunity score.",
+    description: "Identifies dealers with aged and overpriced inventory who are prime candidates for consignment. Searches active listings filtered by high days-on-market (60+ days default), calculates floor plan burn at 7% annual rate, ranks dealers by a weighted consignment opportunity score (DOM 40%, burn 30%, unit count 20%, base 10%), and flags vehicles with geographic arbitrage potential where local stale inventory has strong demand in other markets.",
+    useCases: [
+      { persona: "Auction Consignment Reps", desc: "Prospect for new consignment sources — find dealers bleeding floor plan interest on aged inventory and pitch them on consigning to your next sale." },
+      { persona: "Auction Managers", desc: "Plan sourcing strategy by market — see which ZIP codes and dealer types have the most aged inventory ripe for consignment." },
+      { persona: "Wholesale Buyers", desc: "Identify dealers likely to accept below-market offers on aged units they need to move off their floor plan." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "zip", desc: "Target market ZIP code — auto-fills form and triggers search" },
+      { name: "radius", desc: "Search radius in miles (default: 75)" },
+      { name: "minDom", desc: "Minimum days on market threshold (default: 60)" },
+    ],
     inputParams: [
       { name: "zip", type: "string", required: true, desc: "Target market ZIP code" },
       { name: "radius", type: "number", required: false, desc: "Search radius in miles (default: 75)" },
@@ -1042,7 +1564,7 @@ const APPS = [
     ],
     apiFlow: [
       { step: 1, label: "Aged Inventory Search", apis: ["searchActive"], parallel: false, note: "Search active listings with high DOM, sorted by days on market descending, with dealer facets" },
-      { step: 2, label: "Market Demand Context", apis: ["soldSummary"], parallel: false, note: "Fetch demand rankings to identify which aged vehicles have strong market demand elsewhere" },
+      { step: 2, label: "Market Demand Context", apis: ["searchRecents"], parallel: true, note: "Fetch recent sales per make to identify which aged vehicles have demand elsewhere (geographic arbitrage)" },
     ],
     renders: "Dealer prospect list ranked by consignment opportunity, aged inventory count per dealer, floor plan burn estimates, vehicle-level detail table, geographic arbitrage indicators",
   },
@@ -1052,15 +1574,26 @@ const APPS = [
     tagline: "Identify high-volume buyers in your target market",
     segment: "Auction House",
     toolName: null,
-    description: "Identifies active dealers in a target market by analyzing inventory patterns. Uses active listing facets to find high-volume dealers, categorizes them by type (franchise vs independent), and assesses buying capacity based on inventory size, mix, and turnover patterns.",
+    description: "Identifies active dealers in a target market by analyzing inventory patterns. Uses active listing facets (dealer_id, make, body_type) to find high-volume dealers, categorizes them by seller type (franchise vs independent), estimates buying capacity from inventory size and turnover (DOM), and scores each dealer's segment preference match using cosine similarity against market-level make distribution.",
+    useCases: [
+      { persona: "Auction Sales Reps", desc: "Build a target list of high-volume dealers to invite to your next auction — prioritize by buying capacity and segment fit." },
+      { persona: "Auction Managers", desc: "Understand the buyer landscape in a market before opening a new auction lane or expanding to a new region." },
+      { persona: "Wholesale Distributors", desc: "Find dealers whose inventory mix aligns with your wholesale supply — target dealers who buy what you sell." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "zip", desc: "Target market ZIP code — auto-fills form and triggers search" },
+      { name: "radius", desc: "Search radius in miles (default: 50)" },
+      { name: "make", desc: "Filter by vehicle make (e.g., Toyota)" },
+    ],
     inputParams: [
       { name: "zip", type: "string", required: true, desc: "Target market ZIP code" },
       { name: "radius", type: "number", required: false, desc: "Search radius in miles (default: 50)" },
       { name: "make", type: "string", required: false, desc: "Filter by vehicle make" },
     ],
     apiFlow: [
-      { step: 1, label: "Market Inventory with Dealer Facets", apis: ["searchActive"], parallel: false, note: "Search active listings in target area with dealer_id facets to identify all active dealers" },
-      { step: 2, label: "Demand + Segment Data", apis: ["soldSummary", "soldSummary"], parallel: true, note: "Fetch sold demand by make/model and body type to assess buyer preferences in the market" },
+      { step: 1, label: "Market Inventory with Dealer Facets", apis: ["searchActive"], parallel: false, note: "Search active listings in target area with dealer_id, make, and body_type facets to identify all active dealers and market mix" },
+      { step: 2, label: "Demand + Segment Data", apis: ["searchActive"], parallel: false, note: "Market demand derived from facets in Step 1 (soldSummary is enterprise-only); make and body_type facets provide segment distribution" },
     ],
     renders: "Dealer prospect table ranked by inventory volume, dealer type badges (franchise/independent), inventory mix charts, buying capacity indicators, segment preference match scores",
   },
@@ -1085,15 +1618,32 @@ const APPS = [
     name: "EV Market Monitor",
     tagline: "The EV transition in one dashboard",
     segment: "Cross-Segment",
-    toolName: null,
-    description: "Comprehensive EV market monitoring dashboard. Tracks EV adoption, pricing, and market share using sold summary data segmented by fuel type category.",
+    toolName: "ev-market-monitor",
+    description: "Single-screen EV market dashboard that tracks the transition from ICE to electric. Aggregates Enterprise Sold Summary data segmented by fuel_type_category to surface an adoption-trend line (EV vs Hybrid vs ICE share by month), a body-type price parity tracker, a Top-10 EV brand leaderboard with volume / average price / days-on-market, a Top-15 state penetration table, and an EV-vs-ICE depreciation comparison. A 5-card KPI ribbon at the top summarises current EV penetration, EV-to-ICE price gap, depreciation ratio, days supply, and average DOM.",
+    useCases: [
+      { persona: "OEM Strategy", desc: "Track how fast the shift to electric is happening across body types and geography to plan plant allocation and lineup phase-ins." },
+      { persona: "Lenders & Insurers", desc: "Spot the widening EV-to-ICE depreciation gap that affects LTV and residual-value risk on new loans." },
+      { persona: "Dealer Groups", desc: "See which brands are moving EV inventory fastest (low DOM, low days supply) vs which are stalling — informs stocking decisions." },
+      { persona: "Analysts & Media", desc: "Quotable data points on EV penetration, pricing premium, and state-level leadership — refreshed from real sold data." },
+    ],
     inputParams: [
-      { name: "state", type: "string", required: false, desc: "State for regional analysis" },
+      { name: "timeRange", type: "string", required: false, desc: "Adoption-trend window: 6M (default), 1Y, or 2Y" },
+      { name: "bodyType", type: "string", required: false, desc: "Narrow all metrics to a single body type (e.g., SUV, Sedan, Truck)" },
+      { name: "state", type: "string", required: false, desc: "State code for regional drill-down" },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — switches the app to live mode" },
+      { name: "access_token", desc: "OAuth bearer token (alternative to api_key)" },
+      { name: "timeRange", desc: "6M | 1Y | 2Y — depth of the adoption trend series" },
+      { name: "bodyType", desc: "Filter all charts to a single body type (SUV, Sedan, Truck, Hatchback, ...)" },
+      { name: "state", desc: "Filter to a single state (e.g., CA, TX, NY)" },
+      { name: "embed", desc: "Hide settings bar — for embedding in another dashboard" },
     ],
     apiFlow: [
-      { step: 1, label: "EV Market Data", apis: ["soldSummary"], parallel: false, note: "Fetch sold summary by fuel_type_category with volume and price measures" },
+      { step: 1, label: "Adoption Trend (per month)", apis: ["soldSummary"], parallel: false, note: "For each month in the window, call sold summary with ranking_dimensions=fuel_type_category to get EV/Hybrid/ICE sold_count — used to compute share-of-market per month." },
+      { step: 2, label: "Price Parity + Brand Leaderboard + States + DOM", apis: ["soldSummary", "soldSummary", "soldSummary", "soldSummary"], parallel: true, note: "In parallel: (a) body_type,fuel_type_category for price parity, (b) fuel_type_category=EV × make for brand leaderboard, (c) fuel_type_category=EV × state for geography, (d) fuel_type_category=EV × make with average_days_on_market for DOM/days-supply." },
     ],
-    renders: "EV penetration gauge, EV vs ICE price comparison, adoption trend chart, segment breakdown, geographic heatmap",
+    renders: "5-KPI ribbon (penetration, price gap, depreciation ratio, days supply, DOM) + adoption trend line chart + body-type price parity grouped bars + Top-10 brand leaderboard + Top-15 state penetration table + EV-vs-ICE depreciation curve with gap annotations",
   },
   {
     id: "vin-history-detective",
@@ -1101,17 +1651,32 @@ const APPS = [
     tagline: "Full listing timeline — dealer hops, price changes, red flags",
     segment: "Cross-Segment",
     toolName: "trace-vin-history",
-    description: "Investigates a vehicle's complete listing history. Shows every time it appeared on a dealer lot, with price changes, dealer hops, and time-on-market — revealing red flags and market behavior patterns.",
+    description: "Paste a VIN and get its complete listing-history investigation on one page: every priced listing the vehicle appeared on across MarketCheck's dealer network (with dates, price, miles, city/state, source), the dealer hop chain that collapses same-dealer re-listings, journey KPIs (total listings, dealers visited, total days on market, total price change), a stepped price-timeline chart, a price-trajectory narrative, automated red-flag alerts (excessive transfers, prolonged market time, price erosion, cross-state movement, above/below-FMV pricing), and a fair-market-value comparison against the current asking price.",
+    useCases: [
+      { persona: "Used-Car Shoppers", desc: "Before you buy, see if a VIN has been on-and-off lots for a year, dropped $5K, or hopped four states — classic signs of undisclosed issues." },
+      { persona: "Dealers & Appraisers", desc: "Understand why a trade-in has been in the market for so long and price it against its real dealer-to-dealer history, not just CarFax events." },
+      { persona: "Auction Buyers", desc: "Spot vehicles that have been routed through wholesale multiple times — aged inventory masquerading as fresh." },
+      { persona: "Fraud & Compliance", desc: "Interstate hops and repeated relisting can surface title or odometer concerns — use the timeline as an investigation starting point." },
+    ],
     inputParams: [
       { name: "vin", type: "string", required: true, desc: "17-character VIN" },
-      { name: "miles", type: "number", required: false, desc: "Current mileage" },
-      { name: "zip", type: "string", required: false, desc: "ZIP code for local context" },
+      { name: "miles", type: "number", required: false, desc: "Current mileage (auto-inferred from the most recent priced listing if omitted)" },
+      { name: "zip", type: "string", required: false, desc: "ZIP for the FMV prediction (auto-inferred from the most recent priced listing if omitted)" },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — switches the app to live mode" },
+      { name: "access_token", desc: "OAuth bearer token (alternative to api_key)" },
+      { name: "vin", desc: "17-character VIN — auto-fills the form and triggers the trace" },
+      { name: "miles", desc: "Pre-fill the optional mileage field (used for the FMV prediction)" },
+      { name: "zip", desc: "Pre-fill the optional ZIP field (used for the FMV prediction)" },
+      { name: "embed", desc: "Hide the settings bar — for embedding in another dashboard" },
     ],
     apiFlow: [
-      { step: 1, label: "Decode VIN", apis: ["decode"], parallel: false, note: "Get vehicle specs" },
-      { step: 2, label: "History + Price", apis: ["carHistory", "predictRetail"], parallel: true, note: "Fetch full listing history and current price prediction in parallel" },
+      { step: 1, label: "Decode VIN", apis: ["decode"], parallel: false, note: "Resolve the VIN into year / make / model / trim / body / engine / transmission / drivetrain / fuel / MSRP." },
+      { step: 2, label: "Listing History", apis: ["carHistory"], parallel: false, note: "Fetch the full cross-dealer listing history for the VIN. The transform filters to priced entries, computes DOM from first/last-seen dates, and collapses consecutive same-dealer listings into dealer hops." },
+      { step: 3, label: "Current FMV", apis: ["predictRetail"], parallel: false, note: "Predict the current fair market value. If the caller didn't supply miles/zip, the client auto-infers them from the most recent priced listing." },
     ],
-    renders: "Timeline visualization with dealer hops, stepped-line price chart, red flag alerts (excessive relisting, price volatility), current value vs historical range",
+    renders: "Vehicle identity card (VIN + YMMT + specs), 4-KPI journey summary (listings / dealers / total DOM / total price change), stepped-line price timeline (one color per dealer), horizontal dealer-hop chain with inter-dealer price deltas, price-trajectory narrative, red-flag alerts (severity-tagged), current FMV-vs-asking bar with variance, and a full detail table of every listing in the VIN's history",
   },
   {
     id: "market-anomaly-detector",
@@ -1119,17 +1684,35 @@ const APPS = [
     tagline: "Find underpriced vehicles and pricing outliers",
     segment: "Cross-Segment",
     toolName: "detect-market-anomalies",
-    description: "Scans active listings for pricing anomalies — underpriced vehicles, overpriced outliers, and unusual patterns. Uses statistical analysis of search results to identify opportunities.",
+    description: "Scans up to 50 active listings for a given make/model/year/state window and flags the pricing outliers using z-score anomaly detection. The market mean and standard deviation come directly from the MarketCheck API's `stats.price` block (computed on the full matching population, not just the page shown). A 1σ–3σ sensitivity slider lets the user tune how aggressive the 'underpriced' threshold is. Each listing's discount% is measured against the real market mean, and the Price Drop Alerts section uses the listing's actual `price_change_percent` — no synthetic markups.",
+    useCases: [
+      { persona: "Used-Car Shoppers", desc: "Spot the single listing that's $10K below market for a reason worth investigating — or because the seller needs to move it fast." },
+      { persona: "Dealers & Appraisers", desc: "Benchmark your own listings against the broader market; see if your asking price falls inside or outside the 1σ band." },
+      { persona: "Auction Buyers", desc: "Find stale inventory with recent price drops in a target market — classic buy-low signals." },
+      { persona: "Fraud & Risk", desc: "Sharply below-market listings on an otherwise tight market can be flagged for title/condition review." },
+    ],
     inputParams: [
-      { name: "make", type: "string", required: false, desc: "Vehicle make" },
-      { name: "model", type: "string", required: false, desc: "Vehicle model" },
-      { name: "year", type: "string", required: false, desc: "Year or range" },
-      { name: "state", type: "string", required: false, desc: "State to search" },
+      { name: "make", type: "string", required: false, desc: "Vehicle make (defaults to Toyota)" },
+      { name: "model", type: "string", required: false, desc: "Vehicle model (defaults to RAV4)" },
+      { name: "year", type: "string", required: false, desc: "Model year (defaults to 2023)" },
+      { name: "state", type: "string", required: false, desc: "2-letter state code (defaults to CO)" },
+      { name: "sensitivity", type: "number", required: false, desc: "Z-score threshold in standard deviations, 1.0–3.0 (defaults to 2.0)" },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key — switches the app to live mode" },
+      { name: "access_token", desc: "OAuth bearer token (alternative to api_key)" },
+      { name: "make", desc: "Pre-fill the Make dropdown" },
+      { name: "model", desc: "Pre-fill the Model dropdown" },
+      { name: "year", desc: "Pre-fill the Year dropdown" },
+      { name: "state", desc: "Pre-fill the State dropdown (2-letter code)" },
+      { name: "sensitivity", desc: "Pre-fill the σ slider (1.0–3.0)" },
+      { name: "embed", desc: "Hide settings bar — for embedding in another dashboard" },
     ],
     apiFlow: [
-      { step: 1, label: "Search with Stats", apis: ["searchActive"], parallel: false, note: "Search active listings with stats (price, miles, DOM) for statistical analysis" },
+      { step: 1, label: "Search with Stats", apis: ["searchActive"], parallel: false, note: "Call /search/car/active with make, model, year, state, rows=50, sort_by=price asc, and stats=price,miles,dom. The response's stats.price.mean and stats.price.stddev become the population-level baseline for anomaly detection." },
+      { step: 2, label: "Score each listing", apis: [], parallel: false, note: "Client-side: flag every listing with price < mean − (sensitivity × stddev) as an anomaly. Each listing's discount% = (mean − price) / mean × 100. The Price Drop Alerts section reads listing.price_change_percent directly — no synthetic values." },
     ],
-    renders: "Anomaly scatter plot (price vs miles), Z-score distribution, underpriced opportunity cards, overpriced alerts, market histogram",
+    renders: "5-KPI ribbon (total scanned, anomalies found, avg discount %, biggest outlier), outlier table with dealer+location+DOM+discount%, box-and-whisker price distribution with anomaly-threshold line and individual points, quick-stats grid (min/Q1/median/Q3/max/stdDev), and real price-drop alert cards from price_change_percent",
   },
   {
     id: "uk-market-trends",
@@ -1137,14 +1720,25 @@ const APPS = [
     tagline: "Macro UK automotive market intelligence",
     segment: "Cross-Segment",
     toolName: "get-uk-market-trends",
-    description: "UK automotive market trends dashboard. Tracks active and recently sold listings across UK dealers with prices in GBP.",
+    description: "Macro snapshot of the UK used-car market in GBP. Live data is built from one parallel call to UK Active (requesting price + miles stats and facets on make, body_type, fuel_type) and one to UK Recents (stats only). Renders a KPI ribbon (total active, average price, average mileage, active-to-sold ratio), a top-15 make leaderboard with market-share bars, a price-bucket histogram, a body-type donut centered on the total count, an active-vs-recently-sold comparison with a price delta %, price-tier cards (Budget / Mid-Range / Premium / Luxury), a fuel-type breakdown with trend labels (Petrol/Diesel → Declining, Hybrid → Growing, Electric → Growing Rapidly), a regional overview, and a set of market-health indicators. A ?make=… URL param scopes every live section to that brand.",
+    useCases: [
+      { persona: "UK Automotive Analysts", desc: "Pull a one-screen macro read of the UK retail market — segment share, price tiers, EV adoption, premium concentration — without stitching data sources by hand." },
+      { persona: "OEM Planners", desc: "Deep-link ?make=Ford (or your brand) to see your share of UK live supply, your segment mix, and how your average asking compares against recently sold stock." },
+      { persona: "Auto Journalists", desc: "Quotable stats for UK market coverage: top make by listings, body-type mix, petrol/diesel decline, EV growth trend, and active-to-sold ratio." },
+      { persona: "Cross-Border Buyers / Dealers", desc: "Gauge UK supply breadth and price bands before sourcing — compare the Budget/Mid/Premium/Luxury tiers and regional availability." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "make", desc: "Scope every section of the dashboard to a single make (e.g. Ford, BMW). Shown as a chip at the top with a clear link." },
+      { name: "embed", desc: "Set to 'true' to hide the settings gear (embedded mode)" },
+    ],
     inputParams: [
-      { name: "make", type: "string", required: false, desc: "Filter by make" },
+      { name: "make", type: "string", required: false, desc: "Filter all trends to a single make" },
     ],
     apiFlow: [
-      { step: 1, label: "UK Active + Recent", apis: ["searchUkActive", "searchUkRecents"], parallel: true, note: "Fetch UK active and recent listings with price/miles stats in parallel" },
+      { step: 1, label: "UK Active (stats + facets) + UK Recents (stats)", apis: ["searchUkActive", "searchUkRecents"], parallel: true, note: "Two parallel UK calls. Active requests rows=0, stats=price,miles, facets=make|body_type|fuel_type. Recents requests rows=0, stats=price,miles. Both optionally scoped by make." },
     ],
-    renders: "UK market overview, price trend charts (GBP), active vs sold comparison, brand market share, segment analysis",
+    renders: "KPI ribbon, make leaderboard (top 15 with market-share bars), price-distribution histogram, body-type donut, active-vs-recently-sold comparison with price delta, price-tier cards, fuel-type breakdown with trend labels, regional overview, and market-health indicators — all GBP.",
   },
   {
     id: "uk-market-explorer",
@@ -1152,20 +1746,39 @@ const APPS = [
     tagline: "Search and compare UK car listings in GBP",
     segment: "Consumer",
     toolName: "search-uk-cars",
-    description: "UK car search with GBP pricing. Search active UK listings by make, model, postal code, and price range. Also fetches recent sold data for market context.",
+    description: "UK-wide used car search in GBP. Filter active UK listings by make, model, postcode + radius, year range, and price range. Returns a card grid with a GOOD DEAL badge for listings priced below the set average, a price-vs-mileage scatter plot with median crosshairs, a make-distribution bar chart with per-make average price, a side-by-side compare drawer (up to 3 vehicles), a recently-sold table for market context, and a summary strip (median, range, counts of below-average and low-mileage vehicles).",
+    useCases: [
+      { persona: "UK Car Shoppers", desc: "Narrow the search by postcode + make/model and spot mispriced stock — the GOOD DEAL badge and median crosshairs show which listings are priced below the local average." },
+      { persona: "UK Independent Dealers", desc: "Benchmark your asking price against live retail supply in your postcode radius before relisting. The make distribution reveals where competition is densest." },
+      { persona: "Auto Journalists / Analysts", desc: "Pull a snapshot of the UK retail market for any make/model to quote average price, median mileage, and dealer concentration by city." },
+      { persona: "Expats and Relocators", desc: "Deep-link a shareable search (postcode + radius + filters) to compare stock around London, Manchester, Edinburgh, etc. in one view." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "postal_code", desc: "UK postcode (e.g. SW1A 1AA, M1 1AE) — pre-fills and auto-runs the search" },
+      { name: "radius", desc: "Search radius in miles (10/25/50/100/200) — defaults to 50" },
+      { name: "make", desc: "Vehicle make (e.g. Ford, BMW, Volkswagen) — auto-runs if provided" },
+      { name: "model", desc: "Vehicle model (e.g. Fiesta, 3 Series) — auto-runs if provided" },
+      { name: "year_min", desc: "Earliest model year" },
+      { name: "year_max", desc: "Latest model year" },
+      { name: "price_min", desc: "Minimum price in GBP" },
+      { name: "price_max", desc: "Maximum price in GBP" },
+      { name: "embed", desc: "Set to 'true' to hide the settings gear (embedded mode)" },
+    ],
     inputParams: [
       { name: "make", type: "string", required: false, desc: "Vehicle make" },
       { name: "model", type: "string", required: false, desc: "Vehicle model" },
-      { name: "year", type: "string", required: false, desc: "Year" },
-      { name: "postal_code", type: "string", required: false, desc: "UK postal code" },
+      { name: "year", type: "string", required: false, desc: "Year or range (e.g. 2018-2023)" },
+      { name: "postal_code", type: "string", required: false, desc: "UK postcode" },
       { name: "radius", type: "number", required: false, desc: "Search radius in miles" },
-      { name: "price_range", type: "string", required: false, desc: "Price range: min-max" },
+      { name: "price_range", type: "string", required: false, desc: "Price range in GBP: min-max" },
+      { name: "miles_range", type: "string", required: false, desc: "Mileage range: min-max" },
     ],
     apiFlow: [
-      { step: 1, label: "UK Active Listings", apis: ["searchUkActive"], parallel: false, note: "Search UK active listings with filters and stats" },
-      { step: 2, label: "UK Sold Context", apis: ["searchUkRecents"], parallel: false, note: "Fetch recently sold for market comparison" },
+      { step: 1, label: "UK Active Listings", apis: ["searchUkActive"], parallel: false, note: "Search UK active listings with filters; request price/miles stats for averages and medians" },
+      { step: 2, label: "UK Sold Context", apis: ["searchUkRecents"], parallel: false, note: "Fetch recently sold UK listings for the market-context table" },
     ],
-    renders: "Search results grid, filter sidebar, price comparison, sold context overlay, GBP pricing throughout",
+    renders: "KPI ribbon (total found, avg price, avg mileage, results shown), vehicle card grid with GOOD DEAL badges, price-vs-mileage scatter with median crosshairs, make distribution bar chart, side-by-side compare drawer (up to 3), recently sold table, search summary footer — all in GBP.",
   },
   {
     id: "uk-dealer-pricing",
@@ -1173,15 +1786,29 @@ const APPS = [
     tagline: "UK lot inventory priced against the market",
     segment: "Dealer",
     toolName: "scan-uk-lot-pricing",
-    description: "UK dealer lot pricing dashboard. Fetches dealer inventory from UK active listings and overlays recently sold data for market context.",
+    description: "UK dealer lot-pricing dashboard. Given a numeric MarketCheck dealer_id and an optional make filter, the app issues three parallel calls — UK Active scoped to the dealer (up to 100 listings with price/miles stats), UK Active again for the market baseline stats, and UK Recents for sold evidence — then classifies every inventory row as REDUCE / COMPETITIVE / RAISE based on its gap vs the market average. The result is a KPI ribbon (units, avg price, avg miles, % overpriced / underpriced), a sortable inventory table with per-row gap £ and gap %, a clickable aging heatmap (0-30d / 31-60d / 61-90d / 90+d) that filters the table, a recent-sales evidence panel, a price-action summary (REDUCE / COMPETITIVE / RAISE cards with share bars), and a revenue-impact strip estimating the GBP uplift if every recommendation were taken.",
+    useCases: [
+      { persona: "UK Independent Dealer Principals", desc: "Identify which vehicles on your lot are overpriced vs the live UK market, and which are leaving money on the table — sorted by gap % with REDUCE / COMPETITIVE / RAISE chips to filter in one click." },
+      { persona: "UK Dealer Group Pricing Teams", desc: "Deep-link ?dealer_id=<n>&make=<brand> into each rooftop's dashboard from internal tools or dashboards — the app auto-runs the analysis on load." },
+      { persona: "UK Used-Car Analysts", desc: "Compare a single dealer's pricing posture to the UK-wide make average and recent sold evidence; quantify the gross revenue opportunity if all actions were executed." },
+      { persona: "Lender Risk Reviewers", desc: "Spot rooftops with heavy overpriced inventory and long DOM as early risk signals — the aging heatmap surfaces stale stock at a glance." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "dealer_id", desc: "Numeric MarketCheck UK dealer_id — pre-fills the form and auto-runs the analysis on load." },
+      { name: "make", desc: "Scope the market baseline and recent-sold evidence to a single make (e.g. Ford, BMW) — also auto-runs." },
+      { name: "postal_code", desc: "Context-only UK postcode shown on the form; does not re-scope the API calls." },
+      { name: "embed", desc: "Set to 'true' to hide the settings gear (embedded mode)" },
+    ],
     inputParams: [
-      { name: "dealer_id", type: "string", required: true, desc: "UK dealer ID" },
-      { name: "make", type: "string", required: false, desc: "Filter by make" },
+      { name: "dealer_id", type: "string", required: true, desc: "Numeric UK dealer_id (MarketCheck)" },
+      { name: "make", type: "string", required: false, desc: "Filter baseline + recents by make" },
+      { name: "postal_code", type: "string", required: false, desc: "Context only (displayed, not sent)" },
     ],
     apiFlow: [
-      { step: 1, label: "UK Inventory + Recent Sold", apis: ["searchUkActive", "searchUkRecents"], parallel: true, note: "Fetch dealer inventory and market sold data in parallel" },
+      { step: 1, label: "Inventory + Market Baseline + Recent Sold (parallel)", apis: ["searchUkActive", "searchUkActive", "searchUkRecents"], parallel: true, note: "Three parallel calls. 1) UK Active scoped by dealer_id with rows=100, stats=price,miles. 2) UK Active with rows=0, stats=price,miles, optional make scope — used as the market baseline for gap computation. 3) UK Recents with rows=15, stats=price,miles — sold evidence." },
     ],
-    renders: "Inventory table with market positioning, price gap indicators, aging analysis, sold comparison overlay",
+    renders: "KPI ribbon (total units, avg price, avg miles, % over/underpriced), sortable inventory table with per-row gap £ / gap % / action chip, clickable aging heatmap (0-30 / 31-60 / 61-90 / 90+ days) that filters the table, recent-sales evidence table, price-action summary cards with share bars, and revenue-impact strip estimating GBP uplift if all actions were taken.",
   },
   {
     id: "auto-journalist-briefing",
@@ -1253,11 +1880,23 @@ const APPS = [
     tagline: "Find dealers with aging inventory who need floor plan financing",
     segment: "Lender Sales",
     toolName: null,
-    description: "Scans a territory for dealers with high days-on-market inventory — a signal they may need floor plan financing. Calculates estimated floor plan burn per dealer ($35/day/unit), ranks dealers by opportunity size, and flags those with 90+ DOM inventory exceeding 30% of their lot.",
+    description: "The Floor Plan Opportunity Scanner helps lender sales reps identify dealers in their territory who are most likely to need floor plan financing. It searches for active inventory with high days-on-market, aggregates aged unit counts per dealer, and calculates an estimated monthly floor plan burn at $35/day per unit. Dealers are ranked by burn size and flagged as Hot Prospects when 90+ DOM inventory exceeds 30% of their lot. A sold demand cross-reference (Enterprise API) highlights which aged units have active buyer demand — helping reps open conversations with specific data rather than a cold pitch.",
+    useCases: [
+      { persona: "Lender Sales Reps", desc: "Scan a ZIP + radius before a territory blitz — get a ranked list of dealers by floor plan burn so you walk in with numbers, not guesses." },
+      { persona: "Floor Plan Lenders", desc: "Identify which dealers in a region carry the highest aged inventory exposure and prioritize outreach accordingly." },
+      { persona: "Regional Managers", desc: "Compare floor plan burn across territories to allocate sales resources where the opportunity is largest." },
+      { persona: "Account Managers", desc: "Monitor existing dealer accounts for rising DOM — an early signal that a floor plan line increase or intervention conversation is needed." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "zip", desc: "Territory center ZIP — auto-fills the form" },
+      { name: "radius", desc: "Search radius in miles (25, 50, or 100 — default: 50)" },
+      { name: "min_dom", desc: "Minimum DOM threshold to classify a unit as aged (default: 60)" },
+    ],
     inputParams: [
       { name: "zip", type: "string", required: true, desc: "Territory center ZIP" },
       { name: "radius", type: "number", required: false, desc: "Search radius in miles (default: 50)" },
-      { name: "minDom", type: "number", required: false, desc: "Minimum DOM threshold (default: 60)" },
+      { name: "min_dom", type: "number", required: false, desc: "Minimum DOM threshold (default: 60)" },
     ],
     apiFlow: [
       { step: 1, label: "Aged Inventory by Dealer", apis: ["searchActive"], parallel: false, note: "Search high-DOM listings in territory with dealer facets and stats" },
@@ -1271,11 +1910,23 @@ const APPS = [
     tagline: "Dealer profile data for pitch prep",
     segment: "Lender Sales",
     toolName: null,
-    description: "One-page dealer intelligence brief for sales call prep. Pulls a dealer's active inventory to analyze size, brand mix, body type mix, pricing patterns, aging health, and estimated floor plan exposure. Everything a lender sales rep needs before walking in the door.",
+    description: "The Dealer Intelligence Brief generates a one-page profile of any dealer in seconds — everything a lender sales rep needs before walking in the door. Enter a dealer ID and get: total inventory size, brand mix (donut chart), body type distribution (bar chart), aging health gauge (% of lot at 60+ DOM), estimated monthly floor plan exposure ($35/day per aged unit), average price vs. nearby market, and talking points tailored to the dealer's inventory profile. Add a ZIP for competitor pricing context and a state code for regional demand data (Enterprise API).",
+    useCases: [
+      { persona: "Lender Sales Reps", desc: "Pull a dealer brief before every sales call — walk in knowing their inventory size, brand mix, aging pain points, and a ready-made opening line." },
+      { persona: "Floor Plan Lenders", desc: "Assess a prospect's inventory health at a glance: how many units are aged, what the monthly floor plan burn looks like, and how their pricing compares to market." },
+      { persona: "Account Managers", desc: "Run a quick brief on an existing customer before a review meeting to spot changes in inventory mix or aging that signal a conversation opportunity." },
+      { persona: "Sales Operations", desc: "Pre-populate dealer briefs for the entire sales team's call list — each rep walks in with a data-backed pitch instead of generic talking points." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "dealer_id", desc: "MarketCheck dealer ID — auto-fills the form and triggers brief generation" },
+      { name: "zip", desc: "Dealer ZIP code — enables competitor pricing comparison panel" },
+      { name: "state", desc: "2-letter state code — enables regional sold demand data (Enterprise API)" },
+    ],
     inputParams: [
       { name: "dealer_id", type: "string", required: true, desc: "Target dealer's MarketCheck ID" },
-      { name: "zip", type: "string", required: false, desc: "Dealer ZIP for market context" },
-      { name: "state", type: "string", required: false, desc: "State for demand comparison" },
+      { name: "zip", type: "string", required: false, desc: "Dealer ZIP for market context (competitor pricing)" },
+      { name: "state", type: "string", required: false, desc: "2-letter state code for demand comparison (Enterprise API)" },
     ],
     apiFlow: [
       { step: 1, label: "Dealer Inventory Profile", apis: ["searchActive"], parallel: false, note: "Fetch dealer's full active inventory with stats (price, miles, DOM) and facets (make, model, body_type)" },
@@ -1289,11 +1940,23 @@ const APPS = [
     tagline: "Identify subprime-heavy dealers for lending products",
     segment: "Lender Sales",
     toolName: null,
-    description: "Identifies dealers likely serving subprime buyers by analyzing inventory patterns: high percentage of older vehicles (5+ years), lower price points, independent dealer type, and high DOM. These signals indicate dealers who may need subprime lending products or BHPH (buy-here-pay-here) financing partnerships.",
+    description: "The Subprime Opportunity Finder scans a territory for dealers whose inventory patterns signal a subprime buyer base: vehicles 5+ years old, lower price points (avg under $15K), high DOM, and independent or BHPH dealer type. Each dealer is scored 0–100 using a weighted formula (price score 60% + DOM score 40%) and tagged as BHPH when average price falls below $12K. The tool estimates lending opportunity size per dealer (units × avg price × 0.65) and renders a ranked prospect table with scoring detail. A price distribution chart shows the territory's overall subprime inventory concentration.",
+    useCases: [
+      { persona: "Subprime Lenders", desc: "Find BHPH and independent dealers in a territory who need subprime auto loan products — ranked by opportunity size so you call the highest-value prospects first." },
+      { persona: "Lending Product Sales", desc: "Build a target list of dealers for subprime or second-chance financing programs using data-driven signals instead of cold outreach lists." },
+      { persona: "Portfolio Managers", desc: "Map subprime dealer concentration across ZIP codes to assess regional risk exposure and identify underserved markets." },
+      { persona: "Auto Finance Reps", desc: "Walk into a dealer meeting knowing their average vehicle age, price point, and estimated monthly lending volume — backed by live inventory data." },
+    ],
+    urlParams: [
+      { name: "api_key", desc: "Your MarketCheck API key (or set via localStorage)" },
+      { name: "zip", desc: "Territory center ZIP — auto-fills the form" },
+      { name: "radius", desc: "Search radius in miles (25, 50, or 100 — default: 50)" },
+      { name: "state", desc: "2-letter state code for sold demand context (Enterprise API)" },
+    ],
     inputParams: [
-      { name: "zip", type: "string", required: true, desc: "Target market ZIP" },
-      { name: "radius", type: "number", required: false, desc: "Search radius (default: 50)" },
-      { name: "state", type: "string", required: false, desc: "State for demand data" },
+      { name: "zip", type: "string", required: true, desc: "Target market ZIP code" },
+      { name: "radius", type: "number", required: false, desc: "Search radius in miles (default: 50)" },
+      { name: "state", type: "string", required: false, desc: "2-letter state code for sold demand context (Enterprise API)" },
     ],
     apiFlow: [
       { step: 1, label: "Market Inventory Analysis", apis: ["searchActive"], parallel: false, note: "Search active inventory filtered by older vehicles and lower price points, with dealer facets" },
@@ -1561,6 +2224,83 @@ function generateCurlExample(app) {
     <pre class="code-block">curl -X POST https://apps.marketcheck.com/api/proxy/${app.toolName} \\
   -H "Content-Type: application/json" \\
   -d '${JSON.stringify(body, null, 2)}'</pre>`;
+}
+
+// Sample values keyed by URL-param name. Used to render realistic per-app
+// URL examples on each how-to-build page so analyst apps don't show VIN
+// templates and VIN apps don't show ticker templates.
+const URL_PARAM_SAMPLES = {
+  api_key: "YOUR_KEY",
+  vin: "KNDCB3LC9L5359658",
+  vins: "KNDCB3LC9L5359658,2T3P1RFV5MW123456",
+  price: "25000",
+  askingPrice: "25000",
+  asking_price: "25000",
+  miles: "35000",
+  mileage: "35000",
+  zip: "90044",
+  zipcode: "90044",
+  zip_code: "90044",
+  state: "CA",
+  ticker: "F",
+  tickers: "F,GM,TSLA",
+  make: "Toyota",
+  model: "Camry",
+  year: "2022",
+  bodyType: "suv",
+  body_type: "suv",
+  fuel: "Electric",
+  dealer_id: "12345",
+  dealerId: "12345",
+  compact: "true",
+  embed: "true",
+};
+
+function generateUrlExamples(app) {
+  const params = app.urlParams || [];
+  if (params.length === 0) return "";
+  const baseUrl = `https://apps.marketcheck.com/apps/${app.id}/dist/index.html`;
+  const sampleFor = (name) => URL_PARAM_SAMPLES[name] !== undefined ? URL_PARAM_SAMPLES[name] : "VALUE";
+  const buildUrl = (names) => {
+    const parts = names.map(n => `${n}=${sampleFor(n)}`);
+    return parts.length ? `${baseUrl}?${parts.join("&amp;")}` : baseUrl;
+  };
+
+  const allNames = params.map(p => p.name);
+  const configNames = ["api_key", "compact", "embed"];
+  const dataNames = allNames.filter(n => !configNames.includes(n));
+  const hasCompact = allNames.includes("compact");
+  const hasEmbed = allNames.includes("embed");
+  const hasApiKey = allNames.includes("api_key");
+
+  const examples = [];
+  if (dataNames.length === 0) {
+    examples.push({ comment: "# Basic", url: buildUrl(hasApiKey ? ["api_key"] : []) });
+  } else {
+    const basicNames = (hasApiKey ? ["api_key"] : []).concat([dataNames[0]]);
+    examples.push({
+      comment: `# Basic — pass ${dataNames[0]} to auto-load`,
+      url: buildUrl(basicNames),
+    });
+    if (dataNames.length > 1) {
+      const fullNames = (hasApiKey ? ["api_key"] : []).concat(dataNames);
+      examples.push({ comment: "# Full — all data parameters", url: buildUrl(fullNames) });
+    }
+  }
+  if (hasEmbed || hasCompact) {
+    const embedNames = (hasApiKey ? ["api_key"] : [])
+      .concat(dataNames)
+      .concat(hasEmbed ? ["embed"] : [])
+      .concat(hasCompact ? ["compact"] : []);
+    const label = hasCompact && hasEmbed
+      ? "# Compact widget — for iframe embeds"
+      : hasEmbed
+      ? "# Embedded mode — for iframe embeds"
+      : "# Compact mode — narrow widget layout";
+    examples.push({ comment: label, url: buildUrl(embedNames) });
+  }
+
+  return examples.map(e => `${e.comment}\n${e.url}`).join("\n\n");
 }
 
 function generateMcpConfig(app) {
@@ -1925,14 +2665,7 @@ pre.code-block {
       </tbody>
     </table>
     <h3>URL Examples</h3>
-    <pre class="code-block">${app.urlExamples ? app.urlExamples.map(ex => `# ${ex.label}\nhttps://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;${ex.params}`).join("\n\n") : `# Basic — auto-generate a report for a VIN
-https://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658
-
-# Full — with asking price, mileage, and ZIP for deal scoring
-https://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;price=25000&amp;miles=35000&amp;zip=90044
-
-# Compact widget — for iframe embeds (400px width)
-https://apps.marketcheck.com/apps/${app.id}/dist/index.html?api_key=YOUR_KEY&amp;vin=KNDCB3LC9L5359658&amp;compact=true&amp;embed=true`}</pre>
+    <pre class="code-block">${generateUrlExamples(app)}</pre>
   </div>` : ""}
 
   <!-- Screenshot -->
