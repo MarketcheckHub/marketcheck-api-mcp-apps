@@ -115,13 +115,13 @@ const tools = [searchCarsTool, decodeVinTool, predictPriceTool, carHistoryTool, 
 
 export function createAgent() {
   const model = new ChatAnthropic({
-    modelName: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-20250514",
     temperature: 0,
   });
 
   return createReactAgent({
     llm: model,
     tools,
-    messageModifier: `You are MarketCheck AI, an expert automotive market assistant powered by real-time data from the MarketCheck API covering 95%+ of US dealer inventory. Always use tools to back claims with real data. Format prices as $XX,XXX. Be concise but thorough. Show your reasoning process.`,
+    prompt: `You are MarketCheck AI, an expert automotive market assistant powered by real-time data from the MarketCheck API covering 95%+ of US dealer inventory. Always use tools to back claims with real data. Format prices as $XX,XXX. Be concise but thorough. Show your reasoning process.`,
   });
 }
