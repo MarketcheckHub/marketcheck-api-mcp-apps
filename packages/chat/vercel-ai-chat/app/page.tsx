@@ -1,6 +1,6 @@
 "use client";
 
-import { useChat } from "ai/react";
+import { useChat } from "@ai-sdk/react";
 import { useRef, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
@@ -13,10 +13,23 @@ const SUGGESTIONS = [
 ];
 
 export default function ChatPage() {
-  const { messages, input, handleInputChange, handleSubmit, isLoading, setInput } = useChat();
+  const { messages, sendMessage, status } = useChat();
+  const [input, setInput] = useState("");
+  const isLoading = status === "submitted" || status === "streaming";
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [showToolDetails, setShowToolDetails] = useState<Record<string, boolean>>({});
+
+  const submitText = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    sendMessage({ text: trimmed });
+    setInput("");
+  };
+  const handleSubmit = (e?: { preventDefault?: () => void }) => {
+    e?.preventDefault?.();
+    submitText(input);
+  };
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -31,11 +44,7 @@ export default function ChatPage() {
   };
 
   const handleSuggestion = (text: string) => {
-    setInput(text);
-    setTimeout(() => {
-      const form = document.querySelector("form");
-      form?.requestSubmit();
-    }, 50);
+    submitText(text);
   };
 
   return (
@@ -122,9 +131,14 @@ export default function ChatPage() {
                 }}
               >
                 {/* Tool invocations */}
-                {msg.parts?.map((part, i) => {
-                  if (part.type === "tool-invocation") {
-                    const inv = part.toolInvocation;
+                {msg.parts?.map((part: any, i: number) => {
+                  if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
+                    const inv = {
+                      toolName: part.type === "dynamic-tool" ? part.toolName : part.type.replace(/^tool-/, ""),
+                      state: part.state === "output-available" ? "result" : part.state,
+                      args: part.input,
+                      result: part.output,
+                    };
                     const detailKey = `${msg.id}-${i}`;
                     const isOpen = showToolDetails[detailKey];
                     return (
@@ -175,13 +189,6 @@ export default function ChatPage() {
                   }
                   return null;
                 })}
-
-                {/* Fallback for messages without parts */}
-                {!msg.parts?.length && msg.content && (
-                  <div className="chat-markdown">
-                    <ReactMarkdown>{msg.content}</ReactMarkdown>
-                  </div>
-                )}
               </div>
             </div>
           ))}
@@ -209,11 +216,11 @@ export default function ChatPage() {
           <textarea
             ref={inputRef}
             value={input}
-            onChange={handleInputChange}
+            onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                handleSubmit(e as any);
+                handleSubmit();
               }
             }}
             placeholder="Ask about cars, prices, deals, market trends..."
